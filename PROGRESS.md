@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Status: v1.0.0 complete and verified locally. Not published (owner ships from the phone).**
+**Status: v1.0.0 SHIPPED. Live on npm and GitHub. Marketplace listing is the one step left.**
 
 Last updated 2026-08-24.
 
@@ -70,25 +70,25 @@ Proved as a pure refactor rather than argued: 20 real outputs were recorded befo
 
 Also checked: zero em dashes in any outward-facing file, no comment block over two lines outside the file headers, no TODO/FIXME/placeholder on any path, and `action.yml`'s description is 70 characters.
 
-## Not done, and why
+## Shipped
 
-- **Nothing is published.** No npm publish, no GitHub remote, no release, no Marketplace listing. The brief forbids it; the owner ships from the phone.
-- The repo **is** initialised now: one local commit `6b9ceda` on `main`, 55 files, no remote. `.gitattributes` pins `eol=lf` so the shebang bin cannot check out with CRLF and break the Linux CI leg. Step 1 of the sequence below is done.
+| Step | Result |
+| --- | --- |
+| GitHub repo | https://github.com/Booyaka101/wow-secret-lint, public, 7 topics |
+| CI on the release commit `498fd61` | all 5 checks green (ubuntu/windows x node 20/22, plus the Action running on itself) |
+| npm | `wow-secret-lint@1.0.0`, published, registry resolved in ~8s |
+| Tags | `v1.0.0` and `v1` pushed |
+| Release | https://github.com/Booyaka101/wow-secret-lint/releases/tag/v1.0.0 |
+| Public install proof | `npm install wow-secret-lint` in a clean dir, ran the worked example, correct output, exit 1 |
 
-## Publish sequence for the owner
+## Left for the owner
 
-1. ~~`git init` and the initial commit~~ done: `6b9ceda` on `main`.
-2. `gh repo create Booyaka101/wow-secret-lint --public --source=. --push`
-3. `gh repo edit --add-topic wow --add-topic warcraft --add-topic addon --add-topic lua --add-topic lint --add-topic static-analysis`
-4. Wait for CI green on the exact commit (check-runs API, not `gh run watch`).
-5. `npm publish` (needs an authenticated npm session; an agent cannot mint the token).
-6. `git tag v1.0.0 && git tag -f v1 && git push --follow-tags --force origin v1`
-7. `gh release create v1.0.0 --title "v1.0.0"`, then on the release edit page tick "Publish this Action to the GitHub Marketplace", category **Code quality**. This is the first listing, so it will hit the sudo interstitial.
+**The GitHub Actions Marketplace listing.** `github.com/marketplace/actions/wow-secret-lint` is still 404. The first listing is UI-only: open the release edit page, tick "Publish this Action to the GitHub Marketplace", pick category **Code quality**, and clear the sudo interstitial. It needs a second factor out of your mailbox, so it was left to you rather than automated. Everything it depends on is already correct: `action.yml` has name, description (70 chars, under the 125 limit), author, and branding icon/colour, and the `v1` tag exists.
 
-Best first distribution step after that: a short reply on [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121) and [aura-questor#68](https://github.com/lucascodev/aura-questor/issues/68), where people are actively hitting this trace, rather than a new self-promo post. Both are in the fixture corpus already, so the reply can be concrete about what it catches.
+Once listed, later releases pick themselves up automatically; the sudo wall is only on the first listing.
 
-## If picking this back up
+**Provenance.** 1.0.0 was published from an authenticated local npm session, so it carries no provenance attestation, and npm does not allow republishing a version. To get provenance from 1.0.1 onward, either add an `NPM_TOKEN` secret (classic Automation token, never expires) and publish from a workflow with `--provenance`, or set up npm Trusted Publishing for the package. Both are behind npm's 2FA wall, so both are owner-operated.
 
-- `npm test` is the gate. `npm run lint:self` runs the tool on its own clean fixtures.
-- The corpus harness lives outside the repo at `D:\tmp\wsl-corpus` (`measure.mjs`, `configs.mjs`, `verify.mjs`, `final.mjs`). Re-download with the repo list in `repos.txt` if that scratch directory is gone. Any new rule must be measured there before it ships; a rule that fires on a large fraction of the population is a tax, not a signal.
-- `node bin/wow-secret-lint.mjs --refresh` after a patch day, then `npm test`, then commit the snapshot diff. The weekly workflow does this automatically and opens a PR.
+## Best first distribution step
+
+A short reply on [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121) and [aura-questor#68](https://github.com/lucascodev/aura-questor/issues/68). Both are open, both are people hitting this exact trace right now, and both are already fixtures in the repo so the reply can be concrete about what it catches. Better reach than a self-promo post, and it does not trip low-effort rules.
