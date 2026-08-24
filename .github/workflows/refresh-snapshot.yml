@@ -1,0 +1,31 @@
+name: Refresh API snapshot
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: node bin/wow-secret-lint.mjs --refresh
+      - run: npm test
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: 'data: refresh API snapshot from wow-ui-source@live'
+          title: 'Refresh API snapshot'
+          body: |
+            Rebuilt `data/api-snapshot.json` from the live mirror of Blizzard's
+            generated API documentation. Tests passed against the new snapshot.
+          branch: refresh-api-snapshot
+          delete-branch: true

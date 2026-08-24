@@ -1,0 +1,32 @@
+name: 'wow-secret-lint'
+description: 'Find WoW retail addon Secret Value violations in Lua before they ship.'
+author: 'Booyaka101'
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  path:
+    description: 'Addon folder, .toc, or .lua file to lint. Accepts several, space separated.'
+    required: false
+    default: '.'
+  args:
+    description: 'Extra CLI arguments, e.g. "--conditional=warn --disable=WSL011".'
+    required: false
+    default: ''
+  format:
+    description: 'Output format: github (annotations), stylish, or json.'
+    required: false
+    default: 'github'
+
+outputs:
+  errors:
+    description: 'Number of error-severity findings.'
+    value: ${{ steps.lint.outputs.errors }}
+  warnings:
+    description: 'Number of warning-severity findings.'
+    value: ${{ steps.lint.outputs.warnings }}
+
+runs:
+  using: 'node20'
+  main: 'action/index.mjs'

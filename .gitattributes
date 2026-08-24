@@ -1,0 +1,4 @@
+# Keep LF in the repo and on checkout. The bin has a shebang and CI runs on Linux,
+# so a CRLF checkout would break it.
+* text=auto eol=lf
+*.tgz binary

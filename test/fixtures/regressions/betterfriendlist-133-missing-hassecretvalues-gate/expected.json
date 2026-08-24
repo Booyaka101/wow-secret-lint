@@ -1,0 +1,10 @@
+{
+  "issue": "https://github.com/Hayato2846/BetterFriendlist/issues/133",
+  "reporter": "ItalistAddons",
+  "reported": "2026-08-23T10:33:16Z",
+  "trace": "InstallGuildMOTDChatHooks is missing the HasSecretValues gate used by its sibling chat-pipeline hooks",
+  "covers": "one level of intra-file call-argument passing; the guarded sibling must stay silent",
+  "findings": [
+    { "ruleId": "WSL009", "line": 23, "severity": "warning", "api": "UnitSpellTargetName" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "issue": "https://github.com/lucascodev/aura-questor/issues/68",
+  "reporter": "reesesm2000",
+  "reported": "2026-08-23T12:33:06Z",
+  "trace": "attempt to perform arithmetic on local 'textHeight' (a secret number value, while execution tainted by 'AuraQuestor')",
+  "covers": "multi-return assignment plus arithmetic on a secret",
+  "findings": [
+    { "ruleId": "WSL001", "line": 11, "severity": "error", "api": "UnitGetTotalHealAbsorbs" }
+  ]
+}

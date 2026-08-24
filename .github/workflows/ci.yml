@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm test
+      - name: Acceptance - clean fixture exits 0
+        run: node bin/wow-secret-lint.mjs test/fixtures/clean
+      - name: Acceptance - snapshot has real Blizzard data
+        run: >
+          node -e "const s=require('./data/api-snapshot.json');
+          if(s.functionCount<5000) throw new Error('snapshot too small: '+s.functionCount);
+          if(!s.functions.UnitHealth.secretReturns) throw new Error('UnitHealth not secret');
+          if(s.secretReturnCount<1) throw new Error('no SecretReturns entries');
+          console.log(s.functionCount+' functions, '+s.secretReturnCount+' SecretReturns')"
+
+  self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the action on the bundled fixtures
+        uses: ./
+        with:
+          path: test/fixtures/clean
+          format: github

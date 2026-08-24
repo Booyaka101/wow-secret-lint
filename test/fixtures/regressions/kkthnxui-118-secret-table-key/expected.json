@@ -1,0 +1,10 @@
+{
+  "issue": "https://github.com/Kkthnx-Wow/KkthnxUI/issues/118",
+  "reporter": "jochribra",
+  "reported": "2026-08-22T15:33:26Z",
+  "trace": "attempted to index a table that cannot be indexed with secret keys",
+  "findings": [
+    { "ruleId": "WSL005", "line": 9, "severity": "error", "api": "UnitHealth" },
+    { "ruleId": "WSL005", "line": 10, "severity": "error", "api": "UnitHealth" }
+  ]
+}

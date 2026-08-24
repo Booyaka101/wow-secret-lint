@@ -1,0 +1,16 @@
+{
+  "issue": "https://github.com/0xbs/premade-groups-filter/issues/399",
+  "reporter": "ItalistAddons",
+  "reported": "2026-08-23T10:30:23Z",
+  "trace": "attempt to index field 'activityIDs' (a secret table value, while execution tainted by 'PremadeGroupsFilter')",
+  "covers": "per-field precision from the NeverSecret markers: numMembers must stay silent",
+  "conditional": "warn",
+  "findings": [
+    {
+      "ruleId": "WSL005",
+      "line": 15,
+      "severity": "warning",
+      "api": "C_LFGList.GetSearchResultInfo"
+    }
+  ]
+}

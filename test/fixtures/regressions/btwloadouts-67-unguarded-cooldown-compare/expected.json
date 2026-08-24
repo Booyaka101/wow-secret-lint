@@ -1,0 +1,16 @@
+{
+  "issue": "https://github.com/Breeni/BtWLoadouts/issues/67",
+  "reporter": "AndyMM22",
+  "reported": "2026-08-07T14:15:40Z",
+  "trace": "12.0 made GetSpellCooldown's start a secret value; five sites compare it unguarded",
+  "covers": "conditional secrecy via SecretWhenCooldownsRestricted, and NeverSecret field precision",
+  "conditional": "warn",
+  "findings": [
+    {
+      "ruleId": "WSL002",
+      "line": 13,
+      "severity": "warning",
+      "api": "C_Spell.GetSpellCooldown"
+    }
+  ]
+}

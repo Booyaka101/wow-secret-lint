@@ -1,0 +1,55 @@
+{
+  "name": "wow-secret-lint",
+  "version": "1.0.0",
+  "description": "Static analysis for World of Warcraft retail addons: finds Secret Value violations in Lua before they ship.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Booyaka101",
+  "homepage": "https://github.com/Booyaka101/wow-secret-lint#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Booyaka101/wow-secret-lint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Booyaka101/wow-secret-lint/issues"
+  },
+  "keywords": [
+    "wow",
+    "warcraft",
+    "addon",
+    "lua",
+    "lint",
+    "secret-values",
+    "static-analysis"
+  ],
+  "bin": {
+    "wow-secret-lint": "bin/wow-secret-lint.mjs"
+  },
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "action/",
+    "vendor/",
+    "data/api-snapshot.json",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint:self": "node bin/wow-secret-lint.mjs test/fixtures/clean",
+    "action": "node action/index.mjs"
+  },
+  "dependencies": {
+    "luaparse": "^0.3.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "issue": "https://github.com/Kkthnx-Wow/KkthnxUI/issues/121",
+  "reporter": "CDNDream",
+  "reported": "2026-08-23T11:56:12Z",
+  "trace": "attempt to perform arithmetic on local 'textHeight' (a secret number value, while execution tainted by 'KkthnxUI')",
+  "findings": [
+    { "ruleId": "WSL001", "line": 10, "severity": "error", "api": "UnitHealthPercent" },
+    { "ruleId": "WSL001", "line": 11, "severity": "error", "api": "UnitHealthPercent" }
+  ]
+}

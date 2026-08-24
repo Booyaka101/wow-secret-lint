@@ -1,0 +1,7 @@
+## Interface: 120001
+## Title: CleanAddon
+## Notes: Only performs operations the Secret Values page explicitly permits.
+## Version: 1.0.0
+
+Core/Guarded.lua
+Core/Permitted.lua

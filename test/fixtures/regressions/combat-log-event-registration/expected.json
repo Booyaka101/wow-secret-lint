@@ -1,0 +1,9 @@
+{
+  "issue": "https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes",
+  "trace": "COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them",
+  "covers": "the replacement event and unrelated events must stay silent",
+  "findings": [
+    { "ruleId": "WSL008", "line": 4, "severity": "error", "api": null },
+    { "ruleId": "WSL008", "line": 5, "severity": "error", "api": null }
+  ]
+}
