@@ -163,3 +163,21 @@ Third time the same shell trap landed: `
 
 - No in-game confirmation of whether `SecretReturns` APIs are secret on every call. The default is built so this no longer changes whether it is correct.
 - Marketplace listing and the two issue comments remain held.
+
+## Marketplace listing: attempted, not completed
+
+Drove the release edit page over CDP. Everything up to the second factor is done and correct:
+
+- `Publish this Action to the GitHub Marketplace` ticked
+- primary category **Code quality** (12), secondary **Continuous integration** (2)
+- no validation errors; `action.yml` passes (description is 70 chars, under the 125 limit)
+- `Update release` submitted, which correctly triggered GitHub's sudo interstitial
+
+The sudo step failed three times and I stopped rather than keep burning attempts. Two mistakes, both mine:
+
+1. The Gmail tab was parked on a permalink to the **previous** sudo email from the rimpatch listing on Aug 23. Clicking the top row and reading the page body returned that stale message, so the first code was a day old. The subjects are identical, so nothing about the row text gave it away.
+2. After the failure I clicked `Verify via email` again. That invalidated the still-valid 11:36 code and GitHub sent no replacement; twelve polls over two minutes showed no new mail. The mailer is rate-limited, so a retry click leaves you with zero valid codes.
+
+Nothing was damaged. The release is published and not a draft, the repo is public with 7 topics, npm is on 1.2.0, 132 tests pass. The Marketplace change simply was not saved, because GitHub only replays the pending POST after sudo succeeds.
+
+**To finish it** (about a minute, once the mailer cools off): open https://github.com/Booyaka101/wow-secret-lint/releases/edit/v1.2.0, tick the Marketplace checkbox, pick Code quality, click Update release, and enter the emailed code. One code, one attempt.
