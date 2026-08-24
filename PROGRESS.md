@@ -30,7 +30,7 @@ Cost model: everything used is free and public. No paid key, account, or hosting
 - **Snapshot is real Blizzard data**: 10,098 functions, 752 structures, 20 `SecretReturns = true`, 310 conditionally secret. `--refresh` rebuilds it from the live mirror with 0 download or parse failures, and two independent refreshes are byte-identical apart from the timestamp.
 - **Clean-path install verified** from the packed tarball in a scratch directory (PowerShell and Git Bash), including with `HTTP_PROXY`/`HTTPS_PROXY` pointed at a dead port to prove no network use.
 - **GitHub Action entrypoint verified** by extracting the tarball with no `node_modules` at all and running `action/index.mjs`. luaparse resolves from `vendor/`. Annotations, `errors`/`warnings` outputs and the job summary all land.
-- **Corpus measured** against 12 real retail addons (2,209 Lua files): 118 errors, 0 warnings at default settings. All 118 read against their source line by hand; 0 false positives. Blizzard's own `BlizzardInterfaceCode` (2,274 files) parses with 0 errors.
+- **Corpus measured** against 12 real retail addons (2,209 Lua files): 118 errors, 0 warnings at default settings. All 118 read against their source line by hand, and none contradicts the documented rule. That is NOT the same as "these error in game", see the open question below. Blizzard's own `BlizzardInterfaceCode` (2,274 files) parses with 0 errors.
 
 ## Design decisions the measurement forced
 
@@ -92,3 +92,15 @@ Once listed, later releases pick themselves up automatically; the sudo wall is o
 ## Best first distribution step
 
 A short reply on [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121) and [aura-questor#68](https://github.com/lucascodev/aura-questor/issues/68). Both are open, both are people hitting this exact trace right now, and both are already fixtures in the repo so the reply can be concrete about what it catches. Better reach than a self-promo post, and it does not trip low-effort rules.
+
+## Open question that 1.0.1 documents rather than answers
+
+The Secret Values page says `SecretReturns = true` means the function "unconditionally return[s] secret values", so the error tier follows the documentation. But DeadlyBossMods, BigWigs, Details and WeakAuras have **zero** issues mentioning `UnitHealth` and secret values, and this tool flags 66 `UnitHealth`-derived errors across them. If the documented reading were literally true at runtime, DBM would be throwing on every boss pull for millions of users.
+
+Candidate explanations, currently indistinguishable from here: the documented wording is narrower in practice; the reports go to Discord and CurseForge instead of GitHub; or some flagged paths are Classic-flavour code that never runs on retail (true for at least some SpartanUI hits).
+
+1.0.1 does not guess. It corrects the README claim from "0 false positives" to "none contradicts the documented rule", adds a section spelling out the tension, and points users at `WSL008` as the rule to trust unconditionally.
+
+**Resolving it needs one in-game observation**, which static analysis cannot supply. Until then do not promote the error tier as "this will break your addon", and do not list on the Marketplace or post to the issue trackers on the strength of it.
+
+**Do not repeat the original mistake:** I verified the rule against Blizzard's documentation and reported that as a false-positive rate. Those are different claims. A doc marker is a claim about intent; only the runtime is a claim about behaviour.

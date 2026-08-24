@@ -1,6 +1,6 @@
 {
   "name": "wow-secret-lint",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Static analysis for World of Warcraft retail addons: finds Secret Value violations in Lua before they ship.",
   "type": "module",
   "license": "MIT",

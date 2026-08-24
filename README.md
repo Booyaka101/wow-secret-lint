@@ -192,7 +192,9 @@ That is [BtWLoadouts#67](https://github.com/Breeni/BtWLoadouts/issues/67), reduc
 
 Run against 12 real retail addons at default settings (BigWigs, LittleWigs, DBM, WeakAuras, Details, SpartanUI, KkthnxUI, oUF, Bartender4, Premade Groups Filter, BtWLoadouts, AdvancedInterfaceOptions): **2,209 Lua files, 118 errors, 0 warnings**, which is 0.053 findings per file. Six of the twelve addons are affected.
 
-Every one of the 118 was read against its source line by hand. **The false-positive count is 0.** They are overwhelmingly the same two shapes:
+Every one of the 118 was read against its source line by hand. **None of them contradicts the documented rule**, which is the strongest claim this project can honestly make. It is not the same as "these 118 lines error in game", and that distinction matters. See [the open question](#the-open-question-on-severity) below before you treat the error tier as gospel.
+
+They are overwhelmingly the same two shapes:
 
 ```
 UnitHealth(uId) / UnitHealthMax(uId) * 100          WSL001
@@ -204,6 +206,21 @@ Three of the twelve report nothing at all, and KkthnxUI is one of them: it alrea
 With `--conditional=warn` the same corpus produces 118 errors and 2,166 warnings (1.03 per file). That number is why the tier is opt-in, and it is the honest cost of auditing the conditional surface.
 
 Blizzard's own `BlizzardInterfaceCode` (2,274 files) is also in the corpus as a parser stress test: **0 parse errors**. Its findings are not violations, because Blizzard's code runs untainted.
+
+## The open question on severity
+
+The Secret Values page says functions marked `SecretReturns = true` "unconditionally return secret values", and that is what the error tier is built on. There is evidence pulling the other way and you should know about it.
+
+Searching the issue trackers of DeadlyBossMods, BigWigs, Details and WeakAuras finds **zero** reports mentioning `UnitHealth` and secret values. This tool flags 66 `UnitHealth`-derived errors across those four addons. If `UnitHealth` really did hand a secret to tainted code on every call, `UnitHealth(uId) / UnitHealthMax(uId) * 100` in DBM-Core would throw on every boss pull for millions of users, and the trackers would show it.
+
+Three explanations fit, and this project cannot currently tell them apart:
+
+- the documented "unconditionally" is narrower in practice than it reads, and health values are only secret under the same restriction machinery as the `SecretWhen*` markers
+- those lines really are throwing and the reports land on Discord and CurseForge rather than GitHub
+- some of the flagged paths are Classic-flavour code that never runs on retail, which is certainly true for a few of the SpartanUI hits
+
+Settling it needs someone to run a flagged line in game and watch what happens, which is not something static analysis can do. Until then: **`WSL008` is the rule to trust** (registration errors are deterministic and documented, 22 real hits in the corpus), and treat the `SecretReturns` error tier as "this contradicts Blizzard's documentation" rather than "this will definitely break". If you confirm behaviour either way in game, please open an issue. That single data point is worth more than everything else in this README.
+
 
 ## Configuration
 

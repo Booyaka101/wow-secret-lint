@@ -12,7 +12,7 @@ export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, 
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles } from './toc.mjs';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
