@@ -180,4 +180,8 @@ The sudo step failed three times and I stopped rather than keep burning attempts
 
 Nothing was damaged. The release is published and not a draft, the repo is public with 7 topics, npm is on 1.2.0, 132 tests pass. The Marketplace change simply was not saved, because GitHub only replays the pending POST after sudo succeeds.
 
-**To finish it** (about a minute, once the mailer cools off): open https://github.com/Booyaka101/wow-secret-lint/releases/edit/v1.2.0, tick the Marketplace checkbox, pick Code quality, click Update release, and enter the emailed code. One code, one attempt.
+Second attempt at 12:25 hit the same wall with a cleaner measurement. Five mailer triggers across the hour produced exactly three mails (11:36, 11:40, 11:43) and then nothing, checked against `in:anywhere` so it is not spam filtering. The cooldown is still in force 40+ minutes later. Gmail's own lag masked it: the 11:40 mail did not appear in the list until 12:24.
+
+Everything before the second factor automates cleanly and was re-verified on the second run: checkbox ticked, Code quality primary, Continuous integration secondary, no validation errors, `Update release` submitted, sudo interstitial reached, `#sudo_email_otp` present. The only missing input is a code GitHub will not currently send.
+
+**To finish it**, from a browser already signed in: open https://github.com/Booyaka101/wow-secret-lint/releases/edit/v1.2.0, tick the Marketplace checkbox, pick Code quality, click Update release, then enter the emailed code. One code, one attempt; re-clicking the trigger destroys the outstanding code.
