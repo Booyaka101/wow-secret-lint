@@ -19,6 +19,7 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: node bin/wow-secret-lint.mjs --refresh
+      - run: node scripts/skip-if-unchanged.mjs
       - run: npm test
       - uses: peter-evans/create-pull-request@v7
         with:
