@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Status: v1.2.0. Default gates only on what is certain, discovery is flavour-aware, Classic contamination measured at 0.**
+**Status: v1.2.0 fully shipped. npm, GitHub release, and Marketplace listing all live. Nothing outstanding except the in-game severity question.**
 
 Last updated 2026-08-24.
 
@@ -199,3 +199,31 @@ The script's own CLI-entry guard had a bug caught only by running it: a hand-bui
 Also hit and documented a path trap: Git Bash's `/tmp` and Windows `node.exe`'s own resolution of a leading-slash path are different directories, so a file written by one and read by the other can silently be empty or stale. Diffing against an explicit `D:/tmp/...` path fixed it.
 
 136 tests was the wrong count committed in the fix message; it's 138.
+
+## Marketplace listing: LIVE
+
+https://github.com/marketplace/actions/wow-secret-lint returns 200, listed under **Code quality** at v1.2.0. It was 404 for the whole afternoon before this.
+
+The blocker was never the form, it was the second factor. Everything up to sudo automated cleanly and the pending POST survived: I filled and submitted the form (checkbox, Code quality primary, Continuous integration secondary), the owner cleared sudo, and GitHub replayed my submit an hour later with the categories intact.
+
+**Root cause of the afternoon, and I had it wrong twice.** I blamed rate limiting, then Gmail lag. The real answer is that GitHub's sudo *email* path is unusable here: six triggers produced three mails, every one delivered 45 to 90 minutes late, so every one was past its 15-minute window on arrival. Meanwhile a **"Use your authenticator app"** button sat on the same page the entire time and finished the job in seconds once the owner used it. I should have enumerated the options on that page before committing to one.
+
+LESSONS.md is rewritten accordingly: check for the TOTP button first, fall back to email only if unavailable, and never re-click the email trigger since that invalidates the outstanding code without sending a replacement.
+
+## Final verified state
+
+| Thing | State |
+| --- | --- |
+| npm | `wow-secret-lint@1.2.0`, `latest` |
+| GitHub release | v1.2.0, not a draft, tags `v1.2.0` and `v1` both at `675327c` |
+| Marketplace | live, Code quality, v1.2.0 |
+| Repo | public, 7 topics |
+| CI | green on the release commit, all 5 checks |
+| Tests | 138 passing |
+| Working tree | clean, in sync with origin |
+
+### Genuinely still open
+
+- **No in-game confirmation** of whether `SecretReturns` APIs hand a secret to tainted code on every call. The default is deliberately built so this does not decide whether the tool is correct: only `WSL008` gates a build, everything resting on `SecretReturns` is a warning behind `--strict`. The README asks for exactly this one data point.
+- **The two issue comments are still unposted**, held on the house rule that the owner owns final wording. Drafts are in the session transcript.
+- **No provenance** on any published version. 1.0.0 can never have it; later versions need an `NPM_TOKEN` secret or npm Trusted Publishing, both behind npm's own 2FA wall.
