@@ -4,15 +4,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
-import { findTocFiles, parseToc, resolveTocFiles, collectLuaFiles, isClassicToc, toPosix } from './toc.mjs';
+import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
 
 export { RULES, RULE_IDS } from './rules.mjs';
 export { analyzeSource } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
-export { parseToc, findTocFiles } from './toc.mjs';
+export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -75,20 +75,41 @@ export async function lint(target, options = {}) {
     }
     files = [{ relative: toPosix(relative(cwd, abs)) || abs, absolute: abs }];
   } else {
-    const tocs = (await findTocFiles(abs)).filter((t) => !isClassicToc(t));
-    if (tocs.length) {
+    const label = toPosix(relative(cwd, abs)) || abs;
+    const allTocs = await findTocFilesDeep(abs);
+    const parsed = [];
+    for (const path of allTocs) {
+      try {
+        parsed.push(await parseToc(path));
+      } catch (err) {
+        result.warningsBeforeLint.push(err.message);
+      }
+    }
+    const retail = parsed.filter(isRetailToc);
+
+    if (retail.length) {
       const seen = new Set();
-      for (const toc of tocs) {
-        for (const f of await filesFromToc(toc, result, cwd)) {
+      for (const toc of retail) {
+        for (const f of await filesFromToc(toc.path, result, cwd)) {
           if (seen.has(f.absolute)) continue;
           seen.add(f.absolute);
           files.push(f);
         }
       }
+    } else if (parsed.length) {
+      // Every .toc targets a Classic flavour, which has no secret values. Walking the Lua
+      // anyway would report findings against code that never runs on retail.
+      result.warningsBeforeLint.push(
+        `${label}: found ${parsed.length} .toc file(s), none targeting retail; nothing to check`
+      );
     } else {
       const found = await collectLuaFiles(abs);
-      if (!found.length) {
-        result.warningsBeforeLint.push(`no .toc and no .lua files found under ${toPosix(relative(cwd, abs)) || abs}`);
+      if (found.length) {
+        result.warningsBeforeLint.push(
+          `${label}: no .toc found, scanning every .lua instead; flavour cannot be determined`
+        );
+      } else {
+        result.warningsBeforeLint.push(`no .toc and no .lua files found under ${label}`);
       }
       files = found.map((p) => ({ relative: toPosix(relative(cwd, p)) || p, absolute: p }));
     }

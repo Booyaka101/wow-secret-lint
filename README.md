@@ -33,6 +33,8 @@ Node 20 or newer. No network access during a lint run: the API snapshot is vendo
 
 Point it at an addon folder and it reads the `.toc` files to decide which Lua to analyse, in load order, following `<Script>` and `<Include>` entries in any listed `.xml`.
 
+Discovery is flavour-aware. If the folder has no `.toc` it descends up to three levels to find one, which is how most repos are laid out. A `.toc` counts as retail when any of its `## Interface` ids is a retail one; a folder whose every `.toc` targets Classic is skipped with a message rather than scanned. Only when there is no `.toc` anywhere does it fall back to walking every `.lua`, and it says so when it does.
+
 ```bash
 npx wow-secret-lint ./MyAddon
 ```
@@ -196,26 +198,28 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 
 | Mode | Errors | Warnings | Addons that would fail CI |
 | --- | --- | --- | --- |
-| default | 22 | 96 | 4 of 12 |
-| `--strict` | 118 | 0 | 6 of 12 |
+| default | 20 | 90 | 3 of 12 |
+| `--strict` | 110 | 0 | 5 of 12 |
 
-Every one of the 22 default errors is `WSL008`, a combat log event registration that Blizzard documents as failing. Those are worth fixing today and nothing else in the default output can fail your build.
+Every one of the 20 default errors is `WSL008`, a combat log event registration that Blizzard documents as failing. Those are worth fixing today and nothing else in the default output can fail your build.
 
-All 118 were read against their source line by hand and **none contradicts the documented rule**. That is the strongest claim this project can honestly make, and it is not the same as "these 118 lines error in game". Read the next section before you reach for `--strict`.
+**All 110 are reachable from a retail `.toc`**, checked by resolving every retail `.toc` in each repo and matching it against the findings. Contamination from Classic-flavour code is 0. It was 8 before flavour-aware discovery landed, all of them WeakAuras, which ships only Classic `.toc` files in its repo and was being scanned by a blind directory walk.
 
-Two known limits on that number. Some flagged paths are Classic-flavour code bundled in a retail addon (`libs/oUF_Classic`, `libs/LibClassicDurations` in SpartanUI) which never runs on retail; that contamination is real and not yet quantified. And Blizzard's own `BlizzardInterfaceCode` is in the corpus only as a parser stress test, 2,274 files with 0 parse errors, since its code runs untainted and cannot violate these rules.
+All 110 were read against their source line by hand and **none contradicts the documented rule**. That is the strongest claim this project can honestly make, and it is not the same as "these 118 lines error in game". Read the next section before you reach for `--strict`.
+
+SpartanUI's `libs/oUF_Classic` and `libs/LibClassicDurations` do get flagged and that is correct: its single `.toc` declares `## Interface: 120100, 50504, 38002, 20506, 11509`, so those libraries are listed for retail too. Blizzard's own `BlizzardInterfaceCode` is in the corpus only as a parser stress test, 2,274 files with 0 parse errors, since its code runs untainted and cannot violate these rules.
 
 ## The open question on severity
 
 The Secret Values page says functions marked `SecretReturns = true` "unconditionally return secret values", and that is what the error tier is built on. There is evidence pulling the other way and you should know about it.
 
-Searching the issue trackers of DeadlyBossMods, BigWigs, Details and WeakAuras finds **zero** reports mentioning `UnitHealth` and secret values. This tool flags 66 `UnitHealth`-derived errors across those four addons. If `UnitHealth` really did hand a secret to tainted code on every call, `UnitHealth(uId) / UnitHealthMax(uId) * 100` in DBM-Core would throw on every boss pull for millions of users, and the trackers would show it.
+Searching the issue trackers of DeadlyBossMods, BigWigs, Details and WeakAuras finds **zero** reports mentioning `UnitHealth` and secret values, while this tool flags dozens of `UnitHealth`-derived findings across them. If `UnitHealth` really did hand a secret to tainted code on every call, `UnitHealth(uId) / UnitHealthMax(uId) * 100` in DBM-Core would throw on every boss pull for millions of users, and the trackers would show it.
 
 Three explanations fit, and this project cannot currently tell them apart:
 
 - the documented "unconditionally" is narrower in practice than it reads, and health values are only secret under the same restriction machinery as the `SecretWhen*` markers
 - those lines really are throwing and the reports land on Discord and CurseForge rather than GitHub
-- some of the flagged paths are Classic-flavour code that never runs on retail, which is certainly true for a few of the SpartanUI hits
+- the addons are throwing and nobody has traced it back to a specific API yet
 
 Settling it needs someone to run a flagged line in game and watch what happens, which is not something static analysis can do. This is why the default gates on `WSL008` alone. Registration errors are deterministic and documented. Everything else is reported as "this contradicts Blizzard's documentation", which is useful to know and is not the same as "this will break". If you confirm behaviour either way in game, please open an issue. That single data point is worth more than everything else in this README.
 

@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Status: v1.1.0. Recast so the default gates only on what is certain. Marketplace and promotion still held.**
+**Status: v1.2.0. Default gates only on what is certain, discovery is flavour-aware, Classic contamination measured at 0.**
 
 Last updated 2026-08-24.
 
@@ -128,4 +128,38 @@ Two process notes worth keeping. A patch script asserted mid-way and wrote nothi
 
 - Classic-flavour contamination in the 118 is real and unquantified. Next measurement.
 - No in-game confirmation of whether `SecretReturns` APIs are secret on every call. Everything above is built so that answer no longer changes whether the default is correct.
+- Marketplace listing and the two issue comments remain held.
+
+## 1.2.0, the contamination measurement and the bug it found
+
+Measured the Classic contamination in the 118 strict findings by resolving every retail `.toc` in each repo and matching the file lists against the findings. Retail interface ids have six digits (120001); every Classic flavour uses five (11507, 40402, 50504), which is a clean discriminator.
+
+**Result: 8 of 118, 6.8%. All of them WeakAuras. None of them SpartanUI.**
+
+My SpartanUI hypothesis was wrong and I had asserted it twice without checking. Its single `SpartanUI.toc` declares `## Interface: 120100, 50504, 38002, 20506, 11509`, a multi-flavour toc, so `libs/oUF_Classic` and `libs/LibClassicDurations` are listed for retail too. Those findings are legitimate.
+
+The eight were a defect in this tool, not the corpus. WeakAuras keeps its tocs in a `WeakAuras/` subdirectory and ships only `_Cata`, `_Mists`, `_TBC`, `_Vanilla` and `_Wrath` variants. `findTocFiles` at the repo root found nothing, the code fell back to `collectLuaFiles`, and that walks every `.lua` while ignoring flavour entirely. Pointing the tool at any repo whose addon lives one level down silently abandoned the whole `.toc` mechanism, including the Classic filtering the README promises.
+
+Fixed in `findTocFilesDeep` plus `isRetailToc`:
+
+- no `.toc` at the top level means descend up to three levels before giving up
+- a `.toc` is retail when any `## Interface` id is >= 100000; packager tokens like `@toc-version-retail@` count as retail rather than being silently dropped
+- a folder whose every `.toc` targets Classic is skipped with a message instead of scanned
+- the blind walk still exists for folders with no `.toc` anywhere, and now announces itself
+
+Re-measured after the fix:
+
+| Mode | Errors | Warnings | Addons that would fail CI |
+| --- | --- | --- | --- |
+| default | 20 | 90 | 3 of 12 |
+| `--strict` | 110 | 0 | 5 of 12 |
+
+118 to 110 is exactly the eight. Re-running the contamination check reports **0 of 110**, every finding reachable from a retail `.toc`. LittleWigs still resolves 752 files, so nested discovery did not regress the existing path. 132 tests.
+
+Third time the same shell trap landed: `
+` inside a python heredoc arrives as a real newline through the Bash tool and produced an unparseable test file. Rewrote the block with backtick template literals, where real newlines are legal, which sidesteps the escaping entirely. That is the durable fix, not more careful escaping.
+
+### Still open
+
+- No in-game confirmation of whether `SecretReturns` APIs are secret on every call. The default is built so this no longer changes whether it is correct.
 - Marketplace listing and the two issue comments remain held.

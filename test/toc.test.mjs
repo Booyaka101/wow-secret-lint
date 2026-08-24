@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseToc, resolveTocFiles, findTocFiles, isClassicToc } from '../src/toc.mjs';
+import { parseToc, resolveTocFiles, findTocFiles, findTocFilesDeep, isClassicToc, isRetailToc } from '../src/toc.mjs';
 import { lint } from '../src/index.mjs';
 
 async function fixture(files) {
@@ -100,6 +100,74 @@ describe('toc parsing', () => {
     const result = await lint(dir, { cwd: dir });
     expect(result.parseErrors).toEqual([]);
     expect(result.findings.map((f) => f.ruleId)).toEqual(['WSL001']);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('flavour-aware discovery', () => {
+  const BAD = `local hp = UnitHealth("p")
+local x = hp * 2
+`;
+  const toc = (iface, file) => `## Interface: ${iface}
+
+${file}
+`;
+
+  it('classifies retail and Classic toc files by Interface id', async () => {
+    const dir = await fixture({
+      'R.toc': toc('120100', 'a.lua'),
+      'C.toc': toc('40402', 'a.lua'),
+      'M.toc': toc('120100, 50504, 11509', 'a.lua'),
+      'T.toc': toc('@toc-version-retail@', 'a.lua'),
+      'a.lua': '',
+    });
+    const get = async (n) => isRetailToc(await parseToc(join(dir, n)));
+    expect(await get('R.toc')).toBe(true);
+    expect(await get('C.toc')).toBe(false);
+    expect(await get('M.toc')).toBe(true);
+    expect(await get('T.toc')).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('finds a toc nested below the scanned directory', async () => {
+    const dir = await fixture({ 'MyAddon/MyAddon.toc': toc('120100', 'Core.lua'), 'MyAddon/Core.lua': BAD });
+    expect((await findTocFilesDeep(dir)).length).toBe(1);
+    const r = await lint(dir, { cwd: dir });
+    expect(r.filesScanned).toBe(1);
+    expect(r.findings.map((f) => f.ruleId)).toEqual(['WSL001']);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('scans nothing when every nested toc targets Classic', async () => {
+    const dir = await fixture({
+      'WA/WA_Cata.toc': toc('40402', 'Core.lua'),
+      'WA/WA_Vanilla.toc': toc('11509', 'Core.lua'),
+      'WA/Core.lua': BAD,
+    });
+    const r = await lint(dir, { cwd: dir });
+    expect(r.filesScanned).toBe(0);
+    expect(r.findings).toEqual([]);
+    expect(r.warningsBeforeLint.join(' ')).toMatch(/none targeting retail/);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('says so out loud when it falls back to walking every lua', async () => {
+    const dir = await fixture({ 'sub/x.lua': BAD });
+    const r = await lint(dir, { cwd: dir });
+    expect(r.filesScanned).toBe(1);
+    expect(r.warningsBeforeLint.join(' ')).toMatch(/no [.]toc found, scanning every [.]lua/);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('prefers a toc at the top level over descending', async () => {
+    const dir = await fixture({
+      'Top.toc': toc('120100', 'Top.lua'),
+      'Top.lua': BAD,
+      'nested/Deep.toc': toc('120100', 'Deep.lua'),
+      'nested/Deep.lua': BAD,
+    });
+    const r = await lint(dir, { cwd: dir });
+    expect(r.filesScanned).toBe(1);
     await rm(dir, { recursive: true, force: true });
   });
 });

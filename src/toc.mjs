@@ -21,10 +21,48 @@ export async function findTocFiles(dir) {
     .sort();
 }
 
-/** True for a .toc that targets a non-retail flavour, which has no secret values. */
+/** True for a .toc whose filename suffix targets a non-retail flavour. */
 export function isClassicToc(tocPath) {
   const name = basename(tocPath, '.toc');
   return /_(Vanilla|TBC|Wrath|Cata|Mists|Classic)$/i.test(name);
+}
+
+// Retail interface ids have six digits (120001). Every Classic flavour uses five (11507,
+// 40402, 50504), so the width is a reliable discriminator.
+const RETAIL_INTERFACE = 100000;
+
+/**
+ * True when a parsed .toc can load on retail. A multi-flavour .toc counts as retail if any
+ * of its Interface ids is a retail one. Packager tokens like `@toc-version-retail@` are not
+ * numbers, so a .toc with no usable id is treated as retail rather than silently skipped.
+ */
+export function isRetailToc(toc) {
+  if (isClassicToc(toc.path)) return false;
+  const ids = toc.interface.map(Number).filter((n) => Number.isFinite(n));
+  return ids.length ? ids.some((n) => n >= RETAIL_INTERFACE) : true;
+}
+
+/**
+ * Find .toc files at `dir`, and if there are none, keep descending. Real repos often keep
+ * the addon one or two levels down (WeakAuras/WeakAuras.toc), and walking every .lua instead
+ * silently discards the flavour filtering that .toc discovery provides.
+ */
+export async function findTocFilesDeep(dir, maxDepth = 3) {
+  const here = await findTocFiles(dir);
+  if (here.length || maxDepth <= 0) return here;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!e.isDirectory()) continue;
+    if (e.name === '.git' || e.name === 'node_modules' || e.name === '.github') continue;
+    out.push(...(await findTocFilesDeep(join(dir, e.name), maxDepth - 1)));
+  }
+  return out;
 }
 
 function normalise(entry) {
