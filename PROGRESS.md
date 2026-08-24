@@ -72,12 +72,12 @@ Also checked: zero em dashes in any outward-facing file, no comment block over t
 
 ## Not done, and why
 
-- **Nothing is published.** No npm publish, no git repo, no GitHub release, no Marketplace listing. The brief forbids it; the owner ships from the phone.
-- The repo is **not a git repository yet**. `git init` is the first step of the publish sequence below.
+- **Nothing is published.** No npm publish, no GitHub remote, no release, no Marketplace listing. The brief forbids it; the owner ships from the phone.
+- The repo **is** initialised now: one local commit `6b9ceda` on `main`, 55 files, no remote. `.gitattributes` pins `eol=lf` so the shebang bin cannot check out with CRLF and break the Linux CI leg. Step 1 of the sequence below is done.
 
 ## Publish sequence for the owner
 
-1. `git init && git add -A && git commit -m "wow-secret-lint 1.0.0"`
+1. ~~`git init` and the initial commit~~ done: `6b9ceda` on `main`.
 2. `gh repo create Booyaka101/wow-secret-lint --public --source=. --push`
 3. `gh repo edit --add-topic wow --add-topic warcraft --add-topic addon --add-topic lua --add-topic lint --add-topic static-analysis`
 4. Wait for CI green on the exact commit (check-runs API, not `gh run watch`).
