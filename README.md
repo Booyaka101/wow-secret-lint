@@ -1,6 +1,6 @@
 # wow-secret-lint
 
-Static analysis for World of Warcraft **retail** addons. It finds Secret Value violations in your Lua before a player finds them in a red error frame.
+Static analysis for World of Warcraft **retail** addons. It maps where your Lua touches Blizzard's secret-value API, and hard-fails your build on the one thing that is certain to break.
 
 Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. When tainted code does one of those, the wiki is blunt about the result:
 
@@ -16,6 +16,8 @@ on local 'textHeight' (a secret number value, while execution tainted by 'Kkthnx
 That one is [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121), filed 2026-08-23. The identical trace was filed the same week against a completely unrelated addon, [aura-questor#68](https://github.com/lucascodev/aura-questor/issues/68). Both are in this repo's regression corpus.
 
 `wow-secret-lint` reads Blizzard's own generated API documentation, tracks which of your locals hold a secret, and tells you where you touch one.
+
+**It reports, it does not accuse.** Exactly one rule fails your build by default: `WSL008`, registering a combat log event, which Blizzard documents as a hard error. Everything else is a warning, because whether those APIs really hand a secret to tainted code on every call is not something static analysis can confirm. Run `--strict` to gate on the rest once you have decided you want that. [The reasoning is spelled out below](#the-open-question-on-severity) and it is worth two minutes before you wire this into CI.
 
 ## Install
 
@@ -47,12 +49,12 @@ frame.text:SetText(string.format("%s hp", hp))
 
 ```
 $ npx wow-secret-lint Core/UnitFrame.lua
-Core/UnitFrame.lua:3:13  error  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
-Core/UnitFrame.lua:4:4   error  WSL002  comparison of a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
-2 errors, 0 warnings
+Core/UnitFrame.lua:3:13  warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+Core/UnitFrame.lua:4:4   warning  WSL002  comparison of a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+0 errors, 2 warnings
 ```
 
-Exit code 1. Line 5 is deliberately silent: the wiki says calling `string.format` with a secret is fine, so flagging it would be a false positive.
+Exit code 0: these are reported, not gated. `--strict` turns the same two into errors and exit 1. Line 5 is deliberately silent: the wiki says calling `string.format` with a secret is fine, so flagging it would be a false positive.
 
 Add the guard and it goes quiet:
 
@@ -74,7 +76,7 @@ Exit code 0.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | no error-severity findings |
+| 0 | no error-severity findings. Warnings alone never fail the build |
 | 1 | at least one error, or warnings above `--max-warnings` |
 | 2 | a file failed to parse, or a usage/runtime failure |
 
@@ -110,17 +112,17 @@ Outputs: `errors`, `warnings`.
 
 ## Rules
 
-Every error-level rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each.
+Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. Only `WSL008` fails a build by default.
 
 | Rule | Severity | What it catches |
 | --- | --- | --- |
-| WSL001 | error | arithmetic on a secret value |
-| WSL002 | error | relational or equality comparison of a secret value |
-| WSL003 | error | calling a secret value as if it were a function |
-| WSL004 | error | length operator `#` on a secret value |
-| WSL005 | error | indexed access, indexed assignment, or a secret used as a table key |
-| WSL006 | error | secret passed to an API whose `SecretArguments` does not allow it |
-| WSL007 | error | boolean test on a secret whose documented return type is `bool` |
+| WSL001 | warning, error with `--strict` | arithmetic on a secret value |
+| WSL002 | warning, error with `--strict` | relational or equality comparison of a secret value |
+| WSL003 | warning, error with `--strict` | calling a secret value as if it were a function |
+| WSL004 | warning, error with `--strict` | length operator `#` on a secret value |
+| WSL005 | warning, error with `--strict` | indexed access, indexed assignment, or a secret used as a table key |
+| WSL006 | warning, error with `--strict` | secret passed to an API whose `SecretArguments` does not allow it |
+| WSL007 | warning, error with `--strict` | boolean test on a secret whose documented return type is `bool` |
 | WSL008 | error | registering `COMBAT_LOG_EVENT` or `COMBAT_LOG_EVENT_UNFILTERED` |
 | WSL009 | warning | secret crosses into a function in this file that never guards it |
 | WSL010 | warning | conditionally secret value used with no guard anywhere in scope |
@@ -188,24 +190,20 @@ Talents.lua:13:5  warning  WSL002  comparison of a secret value: 'cooldown.start
 
 That is [BtWLoadouts#67](https://github.com/Breeni/BtWLoadouts/issues/67), reduced to its shape.
 
-## Measured false positives
+## Measured on real addons
 
-Run against 12 real retail addons at default settings (BigWigs, LittleWigs, DBM, WeakAuras, Details, SpartanUI, KkthnxUI, oUF, Bartender4, Premade Groups Filter, BtWLoadouts, AdvancedInterfaceOptions): **2,209 Lua files, 118 errors, 0 warnings**, which is 0.053 findings per file. Six of the twelve addons are affected.
+Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details, SpartanUI, KkthnxUI, oUF, Bartender4, Premade Groups Filter, BtWLoadouts, AdvancedInterfaceOptions), 2,209 Lua files:
 
-Every one of the 118 was read against its source line by hand. **None of them contradicts the documented rule**, which is the strongest claim this project can honestly make. It is not the same as "these 118 lines error in game", and that distinction matters. See [the open question](#the-open-question-on-severity) below before you treat the error tier as gospel.
+| Mode | Errors | Warnings | Addons that would fail CI |
+| --- | --- | --- | --- |
+| default | 22 | 96 | 4 of 12 |
+| `--strict` | 118 | 0 | 6 of 12 |
 
-They are overwhelmingly the same two shapes:
+Every one of the 22 default errors is `WSL008`, a combat log event registration that Blizzard documents as failing. Those are worth fixing today and nothing else in the default output can fail your build.
 
-```
-UnitHealth(uId) / UnitHealthMax(uId) * 100          WSL001
-frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")  WSL008
-```
+All 118 were read against their source line by hand and **none contradicts the documented rule**. That is the strongest claim this project can honestly make, and it is not the same as "these 118 lines error in game". Read the next section before you reach for `--strict`.
 
-Three of the twelve report nothing at all, and KkthnxUI is one of them: it already wraps its reads in `IsSecret`, and the guard heuristic sees that.
-
-With `--conditional=warn` the same corpus produces 118 errors and 2,166 warnings (1.03 per file). That number is why the tier is opt-in, and it is the honest cost of auditing the conditional surface.
-
-Blizzard's own `BlizzardInterfaceCode` (2,274 files) is also in the corpus as a parser stress test: **0 parse errors**. Its findings are not violations, because Blizzard's code runs untainted.
+Two known limits on that number. Some flagged paths are Classic-flavour code bundled in a retail addon (`libs/oUF_Classic`, `libs/LibClassicDurations` in SpartanUI) which never runs on retail; that contamination is real and not yet quantified. And Blizzard's own `BlizzardInterfaceCode` is in the corpus only as a parser stress test, 2,274 files with 0 parse errors, since its code runs untainted and cannot violate these rules.
 
 ## The open question on severity
 
@@ -219,7 +217,7 @@ Three explanations fit, and this project cannot currently tell them apart:
 - those lines really are throwing and the reports land on Discord and CurseForge rather than GitHub
 - some of the flagged paths are Classic-flavour code that never runs on retail, which is certainly true for a few of the SpartanUI hits
 
-Settling it needs someone to run a flagged line in game and watch what happens, which is not something static analysis can do. Until then: **`WSL008` is the rule to trust** (registration errors are deterministic and documented, 22 real hits in the corpus), and treat the `SecretReturns` error tier as "this contradicts Blizzard's documentation" rather than "this will definitely break". If you confirm behaviour either way in game, please open an issue. That single data point is worth more than everything else in this README.
+Settling it needs someone to run a flagged line in game and watch what happens, which is not something static analysis can do. This is why the default gates on `WSL008` alone. Registration errors are deterministic and documented. Everything else is reported as "this contradicts Blizzard's documentation", which is useful to know and is not the same as "this will break". If you confirm behaviour either way in game, please open an issue. That single data point is worth more than everything else in this README.
 
 
 ## Configuration
@@ -227,6 +225,7 @@ Settling it needs someone to run a flagged line in game and watch what happens, 
 ```
 --format=<stylish|json|github>  output format (default: stylish)
 --game=<retail|classic>         classic has no secret values and exits 0 immediately
+--strict                        raise SecretReturns findings from warning to error
 --conditional=<off|warn|error>  conditionally secret APIs (default: off)
 --secret-guard=<names>          extra is-secret wrapper functions, comma separated
 --access-guard=<names>          extra can-access wrapper functions, comma separated

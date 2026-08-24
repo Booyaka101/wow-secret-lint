@@ -26,7 +26,7 @@ describe('cli', () => {
   });
 
   it('reproduces the documented worked example byte for byte', async () => {
-    const r = await run(['Core/UnitFrame.lua'], join(HERE, 'fixtures', 'worked-example'));
+    const r = await run(['--strict', 'Core/UnitFrame.lua'], join(HERE, 'fixtures', 'worked-example'));
     expect(r.stdout).toBe(
       [
         "Core/UnitFrame.lua:3:13  error  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)",
@@ -39,7 +39,7 @@ describe('cli', () => {
   });
 
   it('exits 0 once the worked example is guarded', async () => {
-    const r = await run(['Core/Guarded.lua'], join(HERE, 'fixtures', 'worked-example'));
+    const r = await run(['--strict', 'Core/Guarded.lua'], join(HERE, 'fixtures', 'worked-example'));
     expect(r.stdout.trim()).toBe('0 errors, 0 warnings');
     expect(r.code).toBe(0);
   });
@@ -54,12 +54,12 @@ describe('cli', () => {
   it('warns about a .toc entry that is missing on disk and keeps going', async () => {
     const r = await run(['test/fixtures/toc-missing']);
     expect(r.stdout).toMatch(/listed file not found on disk: Core\/Absent\.lua/);
-    expect(r.stdout).toMatch(/Core\/Present\.lua:2:17\s+error\s+WSL001/);
-    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/Core\/Present\.lua:2:17\s+warning\s+WSL001/);
+    expect(r.code).toBe(0);
   });
 
   it('emits valid GitHub annotations', async () => {
-    const r = await run(['--format=github', 'test/fixtures/rules/every-rule.lua']);
+    const r = await run(['--strict', '--format=github', 'test/fixtures/rules/every-rule.lua']);
     const lines = r.stdout.trim().split('\n');
     expect(lines.filter((l) => /^::error file=[^,]+,line=\d+,col=\d+,title=/.test(l)).length).toBe(8);
     expect(lines.filter((l) => /^::warning file=/.test(l)).length).toBe(1);
@@ -67,7 +67,7 @@ describe('cli', () => {
   });
 
   it('emits parseable JSON', async () => {
-    const r = await run(['--format=json', 'test/fixtures/rules/every-rule.lua']);
+    const r = await run(['--strict', '--format=json', 'test/fixtures/rules/every-rule.lua']);
     const parsed = JSON.parse(r.stdout);
     expect(parsed.summary.errors).toBe(8);
     expect(parsed.findings[0].ruleId).toBe('WSL001');
@@ -115,8 +115,19 @@ describe('cli', () => {
   });
 
   it('honours --secret-guard for a custom wrapper name', async () => {
-    const r = await run(['--format=json', '--secret-guard=IsSecret', 'test/fixtures/rules/every-rule.lua']);
+    const r = await run(['--strict', '--format=json', '--secret-guard=IsSecret', 'test/fixtures/rules/every-rule.lua']);
     expect(JSON.parse(r.stdout).summary.errors).toBe(8);
+  });
+
+  it('does not fail the build on SecretReturns findings by default', async () => {
+    const r = await run(['Core/UnitFrame.lua'], join(HERE, 'fixtures', 'worked-example'));
+    expect(r.stdout).toMatch(/warning\s+WSL001/);
+    expect(r.code).toBe(0);
+  });
+
+  it('WSL008 alone fails the build with no flags, because it is deterministic', async () => {
+    const r = await run(['test/fixtures/regressions/combat-log-event-registration/input.lua']);
+    expect(r.code).toBe(1);
   });
 
   it('prints the rule table', async () => {
@@ -128,7 +139,7 @@ describe('cli', () => {
 
   it('prints the version', async () => {
     const r = await run(['--version']);
-    expect(r.stdout.trim()).toBe('1.0.1');
+    expect(r.stdout.trim()).toBe('1.1.0');
   });
 
   it('fails clearly on a path that does not exist', async () => {

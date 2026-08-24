@@ -97,6 +97,11 @@ class Analyzer {
       if (this.options.conditional === 'off') return;
       if (this.options.conditional === 'warn' && sev === 'error') sev = 'warning';
     }
+    // Findings that rest on SecretReturns report as warnings unless --strict. Whether those
+    // APIs really hand a secret to tainted code on every call is unconfirmed in game, so the
+    // default is an inventory of exposure, not a verdict. Rules with no taint behind them
+    // (WSL008) are deterministic and keep their severity.
+    if (taint && taint.kind === 'secret' && sev === 'error' && !this.options.strict) sev = 'warning';
     if (this.options.disable.has(ruleId)) return;
     const p = pos(node);
     const key = `${ruleId}:${p.line}:${p.column}`;
@@ -975,6 +980,7 @@ export function analyzeSource(source, filePath, api, options = {}) {
     disable: options.disable instanceof Set ? options.disable : new Set(options.disable ?? []),
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
+    strict: options.strict === true,
   };
   const parseOptions = { locations: true, ranges: false, comments: false, scope: false };
   let ast;

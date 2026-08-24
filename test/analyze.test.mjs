@@ -55,7 +55,7 @@ describe('forbidden operations', () => {
   });
 
   it('WSL007 errors on a documented bool secret and stays silent on a documented non-bool', () => {
-    const bool = run('local r = UnitInRange("t")\nif r then end\n').findings;
+    const bool = run('local r = UnitInRange("t")\nif r then end\n', { strict: true }).findings;
     expect(bool.map((f) => [f.ruleId, f.severity])).toEqual([['WSL007', 'error']]);
     expect(ids('local hp = UnitHealth("t")\nif hp then end\n')).toEqual([]);
     expect(ids('local n = UnitSpellTargetName("t")\nif n then end\n')).toEqual([]);
@@ -250,5 +250,19 @@ describe('rule filtering and failure handling', () => {
 
   it('handles a file that is only comments', () => {
     expect(run('-- nothing here\n').findings).toEqual([]);
+  });
+});
+
+describe('severity default', () => {
+  it('SecretReturns findings are warnings by default and errors under --strict', () => {
+    const src = 'local hp = UnitHealth("t")' + String.fromCharCode(10) + 'local x = hp / 2' + String.fromCharCode(10);
+    expect(run(src).findings.map((f) => f.severity)).toEqual(['warning']);
+    expect(run(src, { strict: true }).findings.map((f) => f.severity)).toEqual(['error']);
+  });
+
+  it('WSL008 stays an error either way, because registration failure is deterministic', () => {
+    const src = 'f:RegisterEvent("COMBAT_LOG_EVENT")' + String.fromCharCode(10);
+    expect(run(src).findings.map((f) => f.severity)).toEqual(['error']);
+    expect(run(src, { strict: true }).findings.map((f) => f.severity)).toEqual(['error']);
   });
 });

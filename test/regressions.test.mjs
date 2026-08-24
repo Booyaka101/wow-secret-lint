@@ -27,6 +27,7 @@ describe('regression fixtures reconstructed from real shipped traces', () => {
       const result = await lint(join('test', 'fixtures', 'regressions', name, 'input.lua'), {
         cwd: ROOT,
         conditional: expected.conditional ?? 'off',
+        strict: true,
       });
       expect(result.parseErrors).toEqual([]);
 

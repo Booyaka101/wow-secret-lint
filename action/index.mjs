@@ -49,7 +49,7 @@ const fmt = input('format', 'github');
 
 if (!FORMATS.includes(fmt)) fail(`unknown format "${fmt}" (expected one of: ${FORMATS.join(', ')})`);
 
-const options = { conditional: 'off', disable: [], secretGuards: [], accessGuards: [], game: 'retail' };
+const options = { conditional: 'off', strict: false, disable: [], secretGuards: [], accessGuards: [], game: 'retail' };
 let maxWarnings = Infinity;
 
 for (let i = 0; i < extra.length; i++) {
@@ -58,6 +58,10 @@ for (let i = 0; i < extra.length; i++) {
   const key = eq === -1 ? a : a.slice(0, eq);
   const val = () => (eq === -1 ? extra[++i] : a.slice(eq + 1));
   switch (key) {
+    case '--strict':
+      options.strict = true;
+      if (eq !== -1) fail('--strict takes no value');
+      break;
     case '--conditional':
       options.conditional = val();
       break;

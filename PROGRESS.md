@@ -1,6 +1,6 @@
 # PROGRESS
 
-**Status: v1.0.0 SHIPPED. Live on npm and GitHub. Marketplace listing is the one step left.**
+**Status: v1.1.0. Recast so the default gates only on what is certain. Marketplace and promotion still held.**
 
 Last updated 2026-08-24.
 
@@ -104,3 +104,28 @@ Candidate explanations, currently indistinguishable from here: the documented wo
 **Resolving it needs one in-game observation**, which static analysis cannot supply. Until then do not promote the error tier as "this will break your addon", and do not list on the Marketplace or post to the issue trackers on the strength of it.
 
 **Do not repeat the original mistake:** I verified the rule against Blizzard's documentation and reported that as a false-positive rate. Those are different claims. A doc marker is a claim about intent; only the runtime is a claim about behaviour.
+
+## 1.1.0, the recast
+
+The tool printed `error` on findings resting on `SecretReturns = true`, which I could not confirm error in game. One word, and it turned an inventory into a verdict. That is what made 1.0.0 overclaim.
+
+Now: `WSL008` is the only rule that fails a build by default, because combat log registration failure is documented and deterministic. Everything resting on `SecretReturns` reports as a warning, with `--strict` to raise it. The implementation is one line in `report()`, plus wiring, and rules with no taint behind them are untouched.
+
+Measured on the same 12-addon corpus:
+
+| Mode | Errors | Warnings | Addons that would fail CI |
+| --- | --- | --- | --- |
+| default | 22 | 96 | 4 of 12 |
+| `--strict` | 118 | 0 | 6 of 12 |
+
+All 22 default errors are `WSL008`. The point of the recast is that the default is now correct under either reading of the docs, which is the property 1.0.0 lacked.
+
+Regression fixtures assert under `strict: true`, since they document contradictions of the documented rule. 127 tests.
+
+Two process notes worth keeping. A patch script asserted mid-way and wrote nothing, so a later step silently no-oped and `--strict` parsed but never reached the analyser; only asserting on every replace caught it. And a naive `.findings;` replacement landed a paren in the wrong place and produced a syntax error, caught by the suite rather than by review.
+
+### Still open
+
+- Classic-flavour contamination in the 118 is real and unquantified. Next measurement.
+- No in-game confirmation of whether `SecretReturns` APIs are secret on every call. Everything above is built so that answer no longer changes whether the default is correct.
+- Marketplace listing and the two issue comments remain held.

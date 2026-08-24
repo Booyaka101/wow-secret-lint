@@ -12,7 +12,7 @@ export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, 
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles } from './toc.mjs';
 
-export const VERSION = '1.0.1';
+export const VERSION = '1.1.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -24,6 +24,7 @@ export const VERSION = '1.0.1';
  * @param {string[]} options.disable  rule ids to silence
  * @param {string[]} options.secretGuards  extra is-secret wrapper names, e.g. IsSecret
  * @param {string[]} options.accessGuards  extra can-access wrapper names
+ * @param {boolean} options.strict  raise SecretReturns findings from warning to error
  * @param {string} options.snapshotPath
  * @param {string} options.cwd  paths in the report are made relative to this
  */
@@ -98,6 +99,7 @@ export async function lint(target, options = {}) {
     disable: new Set(options.disable ?? []),
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
+    strict: options.strict === true,
   };
 
   for (const file of files) {

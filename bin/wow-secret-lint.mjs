@@ -21,6 +21,9 @@ Usage:
 Options:
   --format=<stylish|json|github>  output format (default: stylish)
   --game=<retail|classic>         classic has no secret values and exits 0 immediately
+  --strict                        raise SecretReturns findings from warning to error.
+                                  Off by default: see "the open question on severity"
+                                  in the README before you gate CI on them.
   --conditional=<off|warn|error>  how to treat APIs Blizzard marks secret only under a
                                   runtime restriction, e.g. SecretWhenCooldownsRestricted
                                   or SecretInChatMessagingLockdown (default: off)
@@ -50,6 +53,7 @@ function parseArgs(argv) {
     format: 'stylish',
     game: 'retail',
     conditional: 'off',
+    strict: false,
     disable: [],
     secretGuards: [],
     accessGuards: [],
@@ -71,6 +75,7 @@ function parseArgs(argv) {
     else if (arg === '--version' || arg === '-v') opts.version = true;
     else if (arg === '--refresh') opts.refresh = true;
     else if (arg === '--rules') opts.rules = true;
+    else if (arg === '--strict') opts.strict = true;
     else if (arg.startsWith('--format')) opts.format = value(arg, argv, () => i++);
     else if (arg.startsWith('--game')) opts.game = value(arg, argv, () => i++);
     else if (arg.startsWith('--conditional')) opts.conditional = value(arg, argv, () => i++);
@@ -171,6 +176,7 @@ async function main() {
     merged = await lintPaths(opts.paths, {
       game: opts.game,
       conditional: opts.conditional,
+      strict: opts.strict,
       disable: opts.disable,
       secretGuards: opts.secretGuards,
       accessGuards: opts.accessGuards,
