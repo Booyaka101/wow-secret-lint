@@ -185,3 +185,17 @@ Second attempt at 12:25 hit the same wall with a cleaner measurement. Five maile
 Everything before the second factor automates cleanly and was re-verified on the second run: checkbox ticked, Code quality primary, Continuous integration secondary, no validation errors, `Update release` submitted, sudo interstitial reached, `#sudo_email_otp` present. The only missing input is a code GitHub will not currently send.
 
 **To finish it**, from a browser already signed in: open https://github.com/Booyaka101/wow-secret-lint/releases/edit/v1.2.0, tick the Marketplace checkbox, pick Code quality, click Update release, then enter the emailed code. One code, one attempt; re-clicking the trigger destroys the outstanding code.
+
+## Incident: scheduled refresh workflow failed, then a real workflow bug found underneath
+
+The weekly "Refresh API snapshot" workflow ran automatically and failed: `GitHub Actions is not permitted to create or approve pull requests`, a repo default I never checked when writing the workflow. Fixed by enabling `default_workflow_permissions=write` and `can_approve_pull_request_reviews` via the API, then re-ran the workflow by hand rather than assuming the setting change worked.
+
+That surfaced a real bug. PR #1 was created successfully but was a no-op: diffed the snapshot field by field and every function/structure entry was byte-identical to what is already committed, only the `generated` timestamp differed. Left unfixed, the workflow would have opened an empty PR every single week forever. Closed PR #1 rather than merge nothing, and added `scripts/skip-if-unchanged.mjs`, wired in right after `--refresh`, which reverts the file when only its volatile fields changed so `create-pull-request` correctly opens nothing.
+
+Verified end-to-end against live data, not just unit tests: ran `--refresh` twice and confirmed the script reverts the resulting timestamp-only diff; hand-edited `functionCount` and confirmed it leaves a genuine change alone.
+
+The script's own CLI-entry guard had a bug caught only by running it: a hand-built `file://${path}` string is missing the third slash `file:///` needs before a Windows drive letter, so the whole CLI branch was silently dead. Fixed with `pathToFileURL`. Tests run the exported pure functions against a throwaway git repo, not the real tracked snapshot, because an earlier draft raced `test/snapshot.test.mjs` by mutating the committed file while vitest ran files in parallel.
+
+Also hit and documented a path trap: Git Bash's `/tmp` and Windows `node.exe`'s own resolution of a leading-slash path are different directories, so a file written by one and read by the other can silently be empty or stale. Diffing against an explicit `D:/tmp/...` path fixed it.
+
+136 tests was the wrong count committed in the fix message; it's 138.
