@@ -236,12 +236,12 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 
 | Mode | Errors | Warnings | Addons that would fail CI |
 | --- | --- | --- | --- |
-| `--patch=12.1` (default) | 273 | 117 | 8 of 12 |
-| `--patch=12.1 --strict` | 383 | 7 | 8 of 12 |
+| `--patch=12.1` (default) | 272 | 117 | 8 of 12 |
+| `--patch=12.1 --strict` | 382 | 7 | 8 of 12 |
 | `--patch=12.0` | 20 | 90 | 3 of 12 |
 | `--patch=12.0 --strict` | 110 | 0 | 5 of 12 |
 
-The two `12.0` rows are identical to what v1.2.0 reported, which is the point of the flag. The jump to 273 is the 12.1 aura and identity surface landing: 148 WSL012 and 104 WSL013 findings, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage: Details' aura scanning (80 WSL012), SpartanUI's aura designer and corner indicators (56), oUF's classpower element and the copy of it inside KkthnxUI (5 each), DBM's class-keyed tables (50 WSL013), BigWigs (20 WSL013). WSL016 catches the silently dead `showCountdownFrame` in oUF `privateauras.lua:133` and both copies of it vendored into KkthnxUI and SpartanUI; WSL014 catches SpartanUI calling the renamed `UIParentLoadAddOn`. No addon in the corpus uses AuraContainers yet, so WSL017 measures 0 there and is exercised by fixtures.
+The two `12.0` rows are identical to what v1.2.0 reported, which is the point of the flag. The jump to 272 is the 12.1 aura and identity surface landing: 148 WSL012 and 103 WSL013 findings, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage: Details' aura scanning (80 WSL012, 15 WSL013), SpartanUI's aura designer and corner indicators (56), oUF's classpower element and the copy of it inside KkthnxUI (5 each), DBM's class-keyed tables (50 WSL013), BigWigs (20 WSL013). WSL016 catches the silently dead `showCountdownFrame` in oUF `privateauras.lua:133` and both copies of it vendored into KkthnxUI and SpartanUI; WSL014 catches SpartanUI calling the renamed `UIParentLoadAddOn`. No addon in the corpus uses AuraContainers yet, so WSL017 measures 0 there and is exercised by fixtures.
 
 The number worth noticing is the one that is zero: **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard, and the analysis credits that idiom (see below). The linter separates code that has done the 12.1 work from code that has not.
 
@@ -305,6 +305,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 - **No auto-fixing.** It tells you where; the fix is yours.
 - **No runtime component and no in-game addon.** This is a build-time linter.
 - **No Classic support.** Classic has no secret values, so `--game=classic` exits 0 immediately.
+- **It cannot diagnose a taint-spread crash.** Some of the worst reports look like `attempt to perform arithmetic on local 'textHeight' (a secret number value, while execution tainted by 'YourAddon')` where every frame of the stack is a Blizzard file. Your addon tainted execution, and then Blizzard's code did the arithmetic. There is no forbidden operation in your Lua to point at, so this tool reports nothing. Running it over the real [aura-questor](https://github.com/lucascodev/aura-questor) source, which has exactly that open report, gives a clean run across 114 files. The regression fixture named after that issue reproduces the shape of the trace, not a finding in their code.
 - **No cross-file interprocedural analysis in v1.** Taint follows plain assignment, table field stores, the return value of a file-local function, and one level of intra-file call-argument passing. A secret that leaves through a global and comes back in another file is not tracked.
 - **No LuaJIT or Lua 5.4 syntax.** Files are parsed as Lua 5.1. WoW accepts a semicolon after `break`, which stock 5.1 does not, so a file that fails on 5.1 gets one retry under the 5.2 grammar before it is reported as a parse error.
 - **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 is the one exception, and its typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback. A button stored in a table field or passed across files is not tracked.
@@ -318,7 +319,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-173 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 rule (`test/fixtures/rules-121/`), a fixture proving `--patch=12.0` reproduces the v1.2.0 output byte for byte (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
+175 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 rule (`test/fixtures/rules-121/`), a fixture proving `--patch=12.0` reproduces the v1.2.0 output byte for byte (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |
