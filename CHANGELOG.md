@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.2 - 2026-08-31
+
+Data only. No rule, message or analysis behaviour changed.
+
+### Changed
+
+- Refreshed `data/api-snapshot.json` from `Gethe/wow-ui-source@live` so the published
+  package carries the current documentation. Two entries moved out of 10,099:
+  `UnitCanAssist` gained `canAssistImmunePC` and `canAssistUninteractable` arguments, and
+  `UnitIsPlayerControlledOrGroupMember` was added. Neither carries `SecretReturns`, neither
+  is conditionally secret, and neither appears in any 12.1 rule list.
+
+Verified inert rather than assumed: the full suite passes against the new snapshot, and the
+12-addon corpus produces the same 500 findings, identical on file, line, column, rule id and
+severity. No structures changed and no functions were removed.
+
 ## 1.4.1 - 2026-08-31
 
 ### Changed
