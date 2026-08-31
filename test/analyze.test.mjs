@@ -234,7 +234,7 @@ describe('rule filtering and failure handling', () => {
   });
 
   it('every rule id in the table is reachable from the fixtures or these tests', () => {
-    expect(RULE_IDS).toHaveLength(17);
+    expect(RULE_IDS).toHaveLength(18);
   });
 
   it('reports a parse error instead of throwing', () => {

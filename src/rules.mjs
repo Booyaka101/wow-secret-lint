@@ -100,6 +100,12 @@ export const RULES = {
     summary: 'forbidden-aspect operation on an AuraButton or AuraContainer',
     source: `${PATCH121} : "Aura Buttons have had the following Forbidden Aspects applied to them: UntrustedScriptExecution, UntrustedLayoutScriptExecution, AlwaysPropagateInput, ScriptedInput, and QueryFocus" / "Aura Containers have had the EventRegistrations Forbidden Aspect applied to them."`,
   },
+  WSL018: {
+    severity: 'error',
+    patch: '12.1',
+    summary: 'call of an aura API that errors while auras are secret',
+    source: `${PATCH121} : "C_UnitAura and C_TooltipInfo APIs that provide access to aura data via index, slot, or instance ID will Lua error when called by addons while auras are secret."`,
+  },
 };
 
 export const RULE_IDS = Object.keys(RULES);
@@ -206,7 +212,12 @@ export const AURA_SECRET_APIS = new Set(
   ].flatMap((n) => [n, n.slice(n.indexOf('.') + 1)])
 );
 
-/** Unit APIs the 12.1 notes name as returning secrets. Category 'identity', rule WSL013. */
+/**
+ * Unit APIs the 12.1 notes name as returning secrets. Category 'identity', rule WSL013.
+ * This is the notes' full list, every one of which also carries
+ * SecretWhenUnitIdentityRestricted in the generated docs. GetInspectSpecialization is in
+ * that list too but the global was removed in the same patch, so it lives in REMOVED_CALLS.
+ */
 export const IDENTITY_SECRET_APIS = new Set([
   'UnitClass',
   'UnitClassBase',
@@ -215,7 +226,40 @@ export const IDENTITY_SECRET_APIS = new Set([
   'UnitSexBase',
   'UnitIsCharmed',
   'UnitIsPossessed',
+  'UnitIsOwnerOrControllerOfUnit',
+  'UnitPhaseReason',
+  'UnitGroupRolesAssigned',
+  'UnitGroupRolesAssignedEnum',
+  'UnitIsRaidOfficer',
+  'UnitInRaid',
+  'UnitIsPVP',
+  'UnitIsGroupLeader',
+  'UnitIsGroupAssistant',
+  'UnitLeadsAnyGroup',
+  'UnitGetAvailableRoles',
 ]);
+
+/**
+ * Aura APIs reached by index, slot or instance id. The 12.1 notes say the call itself
+ * errors while auras are secret, so the call site is reported (WSL018) on top of any
+ * misuse of what it returns.
+ */
+export const AURA_ERRORING_CALLS = new Set(
+  [
+    'C_UnitAuras.GetAuraDataByIndex',
+    'C_UnitAuras.GetAuraDataBySlot',
+    'C_UnitAuras.GetAuraDataByAuraInstanceID',
+    'C_UnitAuras.GetBuffDataByIndex',
+    'C_UnitAuras.GetDebuffDataByIndex',
+    'C_UnitAuras.GetAuraSlots',
+    'C_UnitAuras.IsAuraFilteredOutByInstanceID',
+    'C_TooltipInfo.GetUnitAura',
+    'C_TooltipInfo.GetUnitBuff',
+    'C_TooltipInfo.GetUnitDebuff',
+    'C_TooltipInfo.GetUnitBuffByAuraInstanceID',
+    'C_TooltipInfo.GetUnitDebuffByAuraInstanceID',
+  ].flatMap((n) => [n, n.slice(n.indexOf('.') + 1)])
+);
 
 /**
  * Literal unit tokens that keep identity APIs non-secret. The 12.1 notes state it for
@@ -235,7 +279,23 @@ export const ITERATORS = new Set(['pairs', 'ipairs', 'next', 'unpack']);
 export const AURA_SUGGESTION =
   'show auras with an AuraContainer (AddAuraGroup/AddAuraSlot) instead';
 
-/** Calls removed, renamed or deprecated in 12.1, with the replacement each message names. */
+/**
+ * Calls removed, renamed or deprecated in 12.1. The removals are the 19 entries of the
+ * Removed column of the patch's global function table; the count in that table header is
+ * what pins the list. A replacement is named only where the notes state the rename, or
+ * where the bare global moved into a namespace under the same name and the target is
+ * present in the generated docs. The rest say only that the symbol is gone, because
+ * inventing a replacement is worse than admitting there is none.
+ */
+function removal(name, replacement) {
+  return {
+    ruleId: 'WSL014',
+    message: replacement
+      ? `${name}() was removed or renamed in 12.1; use ${replacement}() instead`
+      : `${name}() was removed in 12.1 and no replacement is documented; calling it errors on a nil value`,
+  };
+}
+
 export const REMOVED_CALLS = {
   UIParentLoadAddOn: {
     ruleId: 'WSL014',
@@ -250,6 +310,40 @@ export const REMOVED_CALLS = {
     message:
       'C_UnitAuras.TriggerPrivateAuraShowDispelType() was removed in 12.1; use the showDispelIcon option on private aura anchors instead',
   },
+
+  // Renames the notes state outright.
+  'C_UnitAuras.AddPrivateAuraAppliedSound': removal(
+    'C_UnitAuras.AddPrivateAuraAppliedSound',
+    'C_UnitAuras.AddAuraSound'
+  ),
+  'C_UnitAuras.RemovePrivateAuraAppliedSound': removal(
+    'C_UnitAuras.RemovePrivateAuraAppliedSound',
+    'C_UnitAuras.RemoveAuraSound'
+  ),
+
+  // Bare globals that moved into a namespace under the same name.
+  CanSurrenderArena: removal('CanSurrenderArena', 'C_PvP.CanSurrenderArena'),
+  GetInspectSpecialization: removal('GetInspectSpecialization', 'C_SpecializationInfo.GetInspectSpecialization'),
+  GetInventorySlotInfo: removal('GetInventorySlotInfo', 'C_PaperDollInfo.GetInventorySlotInfo'),
+  'C_SuperTrack.GetNextWaypointForMap': removal(
+    'C_SuperTrack.GetNextWaypointForMap',
+    'C_Navigation.GetNextWaypointForMap'
+  ),
+
+  // Removed with no replacement this project can verify.
+  BNGetFriendInviteInfo: removal('BNGetFriendInviteInfo'),
+  BNSendVerifiedBattleTagInvite: removal('BNSendVerifiedBattleTagInvite'),
+  CancelItemTempEnchantment: removal('CancelItemTempEnchantment'),
+  GetWeaponEnchantInfo: removal('GetWeaponEnchantInfo'),
+  SetTableSecurityOption: removal('SetTableSecurityOption'),
+  'C_DyeColor.GetDyeColorForItem': removal('C_DyeColor.GetDyeColorForItem'),
+  'C_DyeColor.GetDyeColorForItemLocation': removal('C_DyeColor.GetDyeColorForItemLocation'),
+  'C_Housing.IsInsideOwnHouse': removal('C_Housing.IsInsideOwnHouse'),
+  'C_HousingLayout.GetNumFloors': removal('C_HousingLayout.GetNumFloors'),
+  'C_Ping.GetContextualPingTypeForUnit': removal('C_Ping.GetContextualPingTypeForUnit'),
+  'C_PvP.JoinRandomTrainingGround': removal('C_PvP.JoinRandomTrainingGround'),
+  'C_RecruitAFriend.IsEnabled': removal('C_RecruitAFriend.IsEnabled'),
+
   getglobal: {
     ruleId: 'WSL015',
     message: 'getglobal() is deprecated in 12.1; use _G[name] instead',

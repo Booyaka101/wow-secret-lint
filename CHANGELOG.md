@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.4.0 - 2026-08-31
+
+Closes every item that was sitting in PROGRESS as a next step. Nothing in the 12.1 notes
+that this tool can check statically is left uncovered.
+
+### Added
+
+- **WSL018** (error): calling an aura API that reaches data by index, slot or instance id.
+  The notes say those calls *"will Lua error when called by addons while auras are
+  secret"*, so the call is the failure and the rule fires even where the result is guarded
+  correctly. BigWigs is the case in point: zero WSL012 findings because it guards every
+  aura it reads, four WSL018 findings because it still reaches them by index. The
+  `C_TooltipInfo` aura calls are covered too, but their returns are not treated as secret
+  vectors, because the notes make no claim about their shape.
+- **WSL013 now covers all seventeen identity APIs** the notes name, not the seven of
+  1.3.0. Each of the added eleven also carries `SecretWhenUnitIdentityRestricted` in the
+  generated docs, so the notes and the docs agree. Corpus WSL013 goes 103 to 169.
+- **WSL014 now covers every removed symbol**, all 19 entries of the Removed column of the
+  patch's global function table, rather than the original four. The count in that table
+  header pins the list, so it is complete. A replacement is named only where the notes
+  state the rename or where a bare global moved into a namespace under the same name with
+  the target present in the generated docs; the rest say only that the symbol is gone.
+- **WSL014 reads XML `inherits` attributes.** `.toc` files were already being followed
+  into `.xml` for `<Script>`/`<Include>`, so a `SecureAuraHeaderTemplate` declared in
+  markup is now caught instead of being invisible to a Lua-only scan. Comma-separated
+  inherit lists are handled.
+- **WSL017 follows AuraButtons into table fields**, so `self.buttons[i] = button` inside
+  an `initializeFrame` callback keeps the widget type and later operations on it are still
+  checked.
+
+### Measured
+
+Corpus of 12 addons, 1,997 retail-reachable files: 379 errors and 121 warnings under the
+12.1 default, 9 of 12 would fail CI. `--patch=12.0` is unchanged at 20 errors, 90
+warnings, 3 of 12, still byte for byte what v1.2.0 reported. Every WSL014 finding was read
+against its source line; they are `GetInventorySlotInfo`, `GetInspectSpecialization`,
+`GetWeaponEnchantInfo` and `UIParentLoadAddOn` calls that will be nil in 12.1.
+
+181 tests.
+
 ## 1.3.1 - 2026-08-31
 
 ### Fixed

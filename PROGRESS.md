@@ -1,5 +1,48 @@
 # PROGRESS
 
+## 1.4.0, the backlog closed
+
+**Status: 1.4.0 shipped. Every item that was listed as a next step is done. 181 tests.**
+
+All five 1.4.0 candidates from the previous section were built:
+
+| Was outstanding | Now |
+| --- | --- |
+| Promote the remaining identity APIs | WSL013 covers all 17 the notes name, each verified to carry `SecretWhenUnitIdentityRestricted` in the generated docs. Corpus 103 to 169 |
+| Flag the by-index/slot/instance calls themselves | **WSL018**, a new rule. Fires even where the result is guarded, because the call is what errors |
+| Scan XML `inherits` for `SecureAuraHeaderTemplate` | WSL014 reads every `.xml` the `.toc` already pulls in. The XML paths were being tracked and discarded, so this reuses the existing walk |
+| Track AuraButtons through table fields | `self.buttons[i] = button` carries the widget type |
+| In-game observation of the `SecretReturns` tier | **Still open and not closeable from here.** Static analysis cannot produce it |
+
+WSL014 also grew from 4 symbols to all 19 in the Removed column of the patch's global
+function table. The header count is what pins that list, which matters: a first attempt at
+extracting it returned 31 because the two-column wikitable interleaves Added and Removed,
+and only the count check caught it.
+
+**The finding worth keeping from this round.** BigWigs has zero WSL012 and four WSL018.
+It guards every aura it reads, correctly, and still breaks, because the call it uses to
+reach those auras is the thing that errors. The careful addons did the guard work and the
+guard work is not enough. That is now the headline pair in the README's measured section.
+
+**Provenance is prepared, not done.** `.github/workflows/publish.yml` is committed and
+inert (manual dispatch only), with a version-already-published guard and `--provenance`
+wired. It needs either Trusted Publishing configured on npmjs.com or an `NPM_TOKEN`
+secret, both behind npm's 2FA, so it stays owner-operated. The work that was mine is done;
+what remains is one npm settings page and one click.
+
+**oUF#888** is open with no reply yet. Nothing to do but wait.
+
+### Genuinely open, and why none of it is actionable from here
+
+- **No in-game observation** of whether `SecretReturns` APIs hand a secret to tainted code
+  on every call. Unchanged since 1.1.0, and the default severity is still built so this
+  does not decide whether the tool is correct.
+- **No provenance** on any published version, see above.
+- **oUF#888** awaiting a maintainer.
+
+There is no remaining work item that does not require either the game client or someone
+else's credentials.
+
 ## 1.3.1, and two posts deliberately not made
 
 **Status: 1.3.1 shipped. npm `latest`, release live, `v1` moved, 175 tests, CI green on the merge commit.**
@@ -94,10 +137,13 @@ Only the outward-facing posts, held on the house rule that the owner owns final 
 
 ### Candidates for 1.4.0, in order of value
 
-1. Promote the remaining ten identity APIs after measuring their corpus impact (`UnitGroupRolesAssigned(u) == "TANK"` is everywhere; needs the same guard-crediting care).
-2. Flag calls of by-index/slot/instance aura APIs themselves under a dedicated message, since the 12.1 notes say the call Lua-errors while auras are secret; currently only result misuse is flagged.
-3. Scan XML `inherits` attributes for `SecureAuraHeaderTemplate` while already following `<Script>`/`<Include>`.
-4. Track AuraButtons through table fields (`self.buttons[i] = button` in `initializeFrame`), which is how bigger addons will actually hold them.
+All of 1 to 4 were built in 1.4.0; see the section at the top of this file. Item 5 remains
+open and is not closeable by static analysis.
+
+1. ~~Promote the remaining ten identity APIs~~ done, all 17.
+2. ~~Flag calls of by-index/slot/instance aura APIs themselves~~ done, WSL018.
+3. ~~Scan XML `inherits` attributes~~ done.
+4. ~~Track AuraButtons through table fields~~ done.
 5. An in-game observation of the `SecretReturns` tier remains the single most valuable data point, unchanged from 1.1.0.
 
 ---

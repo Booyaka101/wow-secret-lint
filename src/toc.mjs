@@ -147,7 +147,8 @@ async function expandXml(absXml, seen, out, missing, label) {
 
 /**
  * Resolve a .toc's file list against the filesystem, following .xml script includes.
- * @returns {{ resolved: {relative, absolute}[], missing: string[] }}
+ * `xml` is every .xml actually visited, so callers can check the markup itself.
+ * @returns {{ resolved: {relative, absolute}[], missing: string[], xml: string[] }}
  */
 export async function resolveTocFiles(toc) {
   const root = dirname(toc.path);
@@ -180,7 +181,7 @@ export async function resolveTocFiles(toc) {
     for (const abs of fromXml) push(relative(root, abs).split('\\').join('/'), abs);
   }
 
-  return { resolved, missing };
+  return { resolved, missing, xml: [...seenXml] };
 }
 
 /** Recursively collect .lua files under a directory (fallback when there is no .toc). */

@@ -1,0 +1,52 @@
+name: Publish to npm with provenance
+
+# Manual only. Publishing from CI is what makes a provenance attestation possible, but it
+# needs one of the two setups below to exist first, and both live behind npm's own 2FA.
+# Until then this workflow is inert and releases are published from a local session.
+#
+#   Trusted Publishing (preferred, no token to rotate):
+#     npmjs.com -> wow-secret-lint -> Settings -> Trusted Publisher
+#     repository Booyaka101/wow-secret-lint, workflow publish.yml
+#     then delete the NODE_AUTH_TOKEN line below
+#
+#   Classic automation token:
+#     npmjs.com -> Access Tokens -> Generate -> Automation
+#     add it here as the NPM_TOKEN repository secret
+#
+# Run it after the release tag exists and CI is green on that commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v1.4.0'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # required for provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm test
+      - name: Refuse to publish a version that is already on the registry
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if npm view "wow-secret-lint@$v" version >/dev/null 2>&1; then
+            echo "wow-secret-lint@$v is already published; bump the version first" >&2
+            exit 1
+          fi
+          echo "publishing $v"
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
