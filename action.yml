@@ -10,6 +10,10 @@ inputs:
     description: 'Addon folder, .toc, or .lua file to lint. Accepts several, space separated.'
     required: false
     default: '.'
+  patch:
+    description: 'Patch surface to check: 12.1 (default) or 12.0 for addons pinned to the older client.'
+    required: false
+    default: '12.1'
   args:
     description: 'Extra CLI arguments, e.g. "--conditional=warn --disable=WSL011".'
     required: false

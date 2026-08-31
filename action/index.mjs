@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
-import { RULE_IDS } from '../src/rules.mjs';
+import { RULE_IDS, PATCHES, DEFAULT_PATCH } from '../src/rules.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -49,7 +49,15 @@ const fmt = input('format', 'github');
 
 if (!FORMATS.includes(fmt)) fail(`unknown format "${fmt}" (expected one of: ${FORMATS.join(', ')})`);
 
-const options = { conditional: 'off', strict: false, disable: [], secretGuards: [], accessGuards: [], game: 'retail' };
+const options = {
+  conditional: 'off',
+  strict: false,
+  disable: [],
+  secretGuards: [],
+  accessGuards: [],
+  game: 'retail',
+  patch: input('patch', DEFAULT_PATCH),
+};
 let maxWarnings = Infinity;
 
 for (let i = 0; i < extra.length; i++) {
@@ -67,6 +75,9 @@ for (let i = 0; i < extra.length; i++) {
       break;
     case '--game':
       options.game = val();
+      break;
+    case '--patch':
+      options.patch = val();
       break;
     case '--disable':
       options.disable.push(...val().split(',').map((s) => s.trim()).filter(Boolean));
@@ -93,6 +104,9 @@ if (!['off', 'warn', 'error'].includes(options.conditional)) {
 }
 if (!['retail', 'classic'].includes(options.game)) {
   fail(`unknown --game "${options.game}" (expected retail or classic)`);
+}
+if (!PATCHES.includes(options.patch)) {
+  fail(`unknown patch "${options.patch}" (expected ${PATCHES.join(' or ')})`);
 }
 for (const id of options.disable) {
   if (!RULE_IDS.includes(id)) fail(`unknown rule id "${id}" in --disable`);

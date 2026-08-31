@@ -1,8 +1,75 @@
 # PROGRESS
 
-**Status: v1.2.0 fully shipped. npm, GitHub release, and Marketplace listing all live. Nothing outstanding except the in-game severity question.**
+**Status: 1.3.0 (the Patch 12.1 upgrade) built, tested and pushed as a PR. Publishing to npm and cutting the release are owner steps, as always.**
 
-Last updated 2026-08-24.
+Last updated 2026-08-31. Earlier history (1.0.0 through 1.2.0, the Marketplace saga, the severity recast) is below the 1.3.0 section, unchanged.
+
+## 1.3.0, the 12.1 upgrade
+
+Patch 12.1 (Curse of Ula'tek) went live 2026-08-11. v1.2.0 reported a false clean on `for i = 1, #auras` over `C_UnitAuras.GetUnitAuras`, the most common aura pattern in retail addons. 1.3.0 adds the 12.1 surface as rules WSL012-WSL017 behind a `--patch` flag defaulting to `12.1`.
+
+### Phase 0 verification (all passed, nothing blocked)
+
+| Resource | Result |
+| --- | --- |
+| `Patch_12.1.0/API_changes` | fetched, all quoted sentences present: the "full secrets or nil" aura sentence, the identity API list, the renames, getglobal/setglobal, SecureAuraHeaderTemplate, the four forbidden aspects |
+| `Patch_12.1.0` | "Release date: August 11, 2026", "Curse of Ula'tek" |
+| Published README on GitHub | matches the local one, documents WSL001-011 and the 12.0 snapshot claim |
+| Blizzard forum thread 2317456 | Jayem, 2026-06-18, all three quoted statements verbatim |
+| Blizzard forum thread 2310937 | MrCool and brownie quotes verbatim |
+| `showCountdownFrame` | NOT found by a summarised fetch, so pulled the raw wikitext: it is there, removed from `AddPrivateAuraAnchorArgs` and `UnitPrivateAuraAnchorInfo`, replaced by `showCooldownFrame`/`showCooldownEdge`/`showDispelIcon`. WSL016 names the real replacement |
+| Cost model | everything free and public, no keys, no accounts |
+
+### The design decision the snapshot forced
+
+The brief said `--patch` should "choose which snapshot the built-in rules load". The data says otherwise, in two ways:
+
+1. The current vendored snapshot (refreshed 2026-08-24 from the live branch) is already post-12.1 data, and it carries **no marker at all** for aura secrecy: `C_UnitAuras.GetUnitAuras` is `SecretReturns=false, conditional=null`. Blizzard documents aura secrecy only in the patch notes, never in the generated docs. A 12.1 snapshot with the needed data does not exist to load.
+2. A "12.0 snapshot" never existed in this repo either; the tool was born on 24 Aug against post-12.1 docs.
+
+So there is exactly one snapshot, unchanged, and `--patch` gates the rule surface: the WSL012/WSL013 API lists live in `src/rules.mjs` with the wiki sentences quoted as sources. `--snapshot` and `--refresh` are untouched. This is the "no second parallel snapshot mechanism" half of the brief's sentence, honoured over the literal first half.
+
+### What is VERIFIED working
+
+- **173 tests pass** (`npm test`), including one violating and one clean fixture per new rule, and 33 new tests for the 12.1 surface.
+- **The brief's worked example is exact**: the one-liner produces two WSL012 findings at 1:63 and 1:78 with the tainting call and the AuraContainer/AddAuraGroup/AddAuraSlot suggestion, exit 1; `--patch=12.0` on the same file reports zero and exits 0. Verified in the repo, from the packed tarball in a scratch install, and via the Action entrypoint with `INPUT_PATCH`.
+- **`--patch=12.0` reproduces v1.2.0 byte for byte**, pinned by `test/fixtures/patch/`: the baseline file was recorded with the real v1.2.0 binary before any code changed, and the test diffs against it. The corpus agrees: 20 errors / 90 warnings / 3-of-12 failing, and 110/0/5-of-12 strict, identical to the 1.2.0 measurements.
+- **Corpus, 12 addons, 1,997 retail-reachable files** under the 12.1 default: 273 errors, 117 warnings, 8 of 12 would fail CI. WSL012=148, WSL013=104, WSL014=1, WSL016=3, WSL015=0, WSL017=0 (nobody uses AuraContainers yet; fixtures cover it). Real catches, read in source: oUF `privateauras.lua:133` passes the dead `showCountdownFrame` (so do its vendored copies in KkthnxUI and SpartanUI), SpartanUI calls the renamed `UIParentLoadAddOn`, Details reads unguarded aura fields in its scan loop, DBM keys tables on `UnitClass` results.
+- **Clean-path install** from the packed tarball works; Action entrypoint runs with no node_modules, honours the new `patch` input, rejects a bad one with a one-line error.
+
+### Judgment calls a reviewer should know about
+
+1. **WSL012/WSL013 are errors without `--strict`**, unlike the SecretReturns tier. The 1.1.0 recast principle was "only gate on what Blizzard states outright"; the 12.1 notes state this outright ("will now either return full secrets or nil when called by addons"), and the brief demanded exit 1. The README separates the two epistemic tiers explicitly.
+2. **The DBM guard idiom is credited.** First measurement flagged 335 WSL012, and reading DBM-Core showed why that was wrong: DBM and BigWigs already wrap every aura lookup in `if not t or self:issecretvalue(t.name) then return end`. Indexing one field inside a guard call is the test, and a guard on any field vouches for the whole aura. After crediting that, WSL012=148 and **DBM and BigWigs report zero WSL012**, which is the correct verdict on code that already did the work. Both refinements are gated to 12.1-category taints so the 12.0 byte-for-byte holds.
+3. **Boolean tests on aura returns are never flagged**: the value is a table or nil, nil-checking is the sanctioned pattern, and 12.1 removed the AuraData structure from the docs so the type lookup cannot vouch for it.
+4. **Token exemptions**: `UnitIsCharmed`/`UnitIsPossessed` skip literal player/pet/vehicle (documented in the notes); the other identity APIs skip literal "player" only (a unit is never secret to itself; the notes frame the change as preventing comparison of secret units). Variable tokens always taint.
+5. **WSL013 covers the brief's seven APIs.** The notes list ten more identity APIs (`UnitGroupRolesAssigned`, `UnitInRaid`, `UnitIsPVP`, ...); they stay in the conditional tier (`--conditional=warn`) because promoting them to error was not asked for and was not measured. Listed below as the first candidate for 1.4.0.
+6. **By-spell aura lookups are seeded too** (`GetPlayerAuraBySpellID` and friends), on the strength of "all of the UnitAura APIs"; the brief's list was index/slot/instance only. This is what makes the oUF classpower and Details findings visible.
+
+### House rules review
+
+- Clone check (difflib over all 85 functions in src/bin/action): highest new-function similarity 32% (`checkCreateFrameTemplates` vs `applyGuards`), nothing near the 60% bar. WSL012/013 have no bodies at all, they route through the existing checkers via `ruleFor()`; WSL014/015 share one table-driven check.
+- No em dashes in README/CHANGELOG/PROGRESS, comments only for non-obvious constraints, no TODO on any path.
+- The full suite was run in a real environment after the last code change: 173/173.
+
+### Left for the owner
+
+- Merge the PR, then the usual release steps: tag `v1.3.0`, move `v1`, `npm publish` (2FA), release notes. The release description should mention where the clone check stopped: WSL016 and WSL017 have small standalone bodies because they parallel nothing that exists.
+- The two issue comments from 1.0.0 are still held (owner owns final wording). A third candidate now exists: oUF ships the `showCountdownFrame` bug at `elements/privateauras.lua:133` and two big addons vendor it; a report there fixes three addons at once and the finding is concrete.
+
+### Candidates for 1.4.0, in order of value
+
+1. Promote the remaining ten identity APIs after measuring their corpus impact (`UnitGroupRolesAssigned(u) == "TANK"` is everywhere; needs the same guard-crediting care).
+2. Flag calls of by-index/slot/instance aura APIs themselves under a dedicated message, since the 12.1 notes say the call Lua-errors while auras are secret; currently only result misuse is flagged.
+3. Scan XML `inherits` attributes for `SecureAuraHeaderTemplate` while already following `<Script>`/`<Include>`.
+4. Track AuraButtons through table fields (`self.buttons[i] = button` in `initializeFrame`), which is how bigger addons will actually hold them.
+5. An in-game observation of the `SecretReturns` tier remains the single most valuable data point, unchanged from 1.1.0.
+
+---
+
+## History through 1.2.0
+
+**Status then: v1.2.0 fully shipped. npm, GitHub release, and Marketplace listing all live.**
 
 ## Phase 0 verification (all passed, nothing blocked)
 
@@ -19,211 +86,19 @@ Every external resource in the brief was re-fetched this session:
 | aura-questor #68 | open, reesesm2000, 2026-08-23T12:33:06Z, game 12.10 |
 | BetterFriendlist #133, premade-groups-filter #399, BtWLoadouts #67 | all open with the quoted traces |
 | `Ketho/vscode-wow-api` CHANGELOG | latest 0.22.3 (2026-02-24); zero mentions of secret values. The competitor gap in the brief is real |
-| npm `wow-secret-lint`, GitHub `Booyaka101/wow-secret-lint` | both 404, name is free |
+| npm `wow-secret-lint`, GitHub `Booyaka101/wow-secret-lint` | both 404, name was free |
 
-Cost model: everything used is free and public. No paid key, account, or hosting is required.
+## The 1.1.0 recast (severity)
 
-## What is VERIFIED working
+The tool printed `error` on findings resting on `SecretReturns = true`, which could not be confirmed to error in game. Since 1.1.0, `WSL008` is the only 12.0-era rule that fails a build by default; everything resting on `SecretReturns` reports as a warning, with `--strict` to raise it. Regression fixtures assert under `strict: true`.
 
-- **Worked example matches the brief byte for byte**, including columns, and the guarded variant exits 0.
-- **123 tests pass** (`npm test`): 6 files covering every rule, every guard form, the permitted-operations negatives, `.toc`/XML resolution, the three reporters, the CLI surface, and 8 regression fixtures.
-- **Snapshot is real Blizzard data**: 10,098 functions, 752 structures, 20 `SecretReturns = true`, 310 conditionally secret. `--refresh` rebuilds it from the live mirror with 0 download or parse failures, and two independent refreshes are byte-identical apart from the timestamp.
-- **Clean-path install verified** from the packed tarball in a scratch directory (PowerShell and Git Bash), including with `HTTP_PROXY`/`HTTPS_PROXY` pointed at a dead port to prove no network use.
-- **GitHub Action entrypoint verified** by extracting the tarball with no `node_modules` at all and running `action/index.mjs`. luaparse resolves from `vendor/`. Annotations, `errors`/`warnings` outputs and the job summary all land.
-- **Corpus measured** against 12 real retail addons (2,209 Lua files): 118 errors, 0 warnings at default settings. All 118 read against their source line by hand, and none contradicts the documented rule. That is NOT the same as "these error in game", see the open question below. Blizzard's own `BlizzardInterfaceCode` (2,274 files) parses with 0 errors.
+## The 1.2.0 contamination measurement
 
-## Design decisions the measurement forced
+Flavour-aware `.toc` discovery (`findTocFilesDeep` + `isRetailToc`): no top-level `.toc` means descend up to three levels; a folder whose every `.toc` targets Classic is skipped with a message; the blind walk announces itself. Classic contamination went from 8 of 118 strict findings (all WeakAuras) to 0 of 110.
 
-The first corpus run produced 2,110 findings and 247 parse errors. Four real defects came out of it, each fixed and covered by a test:
+## Marketplace, provenance, and the open severity question
 
-1. **`break;` is valid in WoW's Lua but not stock 5.1.** 229 of Blizzard's own files failed to parse. Now retries under the 5.2 grammar before reporting a parse error.
-2. **Real addons load Lua through `.xml`.** oUF and LittleWigs scanned 0 files. `<Script>` and `<Include>` are now followed recursively; corpus coverage went from 3,229 to 4,483 files.
-3. **`.toc` load directives** (`Locales\[TextLocale].lua [AllowLoadTextLocale deDE, ...]`) were treated as missing files.
-4. **Addon-defined guard wrappers.** KkthnxUI ships `IsSecret`, BigWigs ships `self:IsSecret`. Not recognising them made every correctly-guarded read a false positive. Now detected by name, with `--secret-guard` / `--access-guard` for wrappers that do not match.
-
-The **conditional tier defaults to off**. Measured at `warn` it emits 2,166 warnings on the same corpus (1.03 per Lua file), which is a tax rather than a signal. It is one flag away and the README publishes both numbers.
-
-**WSL007 does not fire on documented non-boolean secrets.** The brief specified a warning there, but the wiki explicitly permits boolean tests on non-boolean secrets, so a warning would be a false positive on correct code. It errors when the documented return type is `bool`, warns when the type is unknown, and stays silent otherwise.
-
-## Ship checklist, marked honestly
-
-| # | Requirement | Status |
-| --- | --- | --- |
-| 1 | Feature complete, no TODO on a user path | met |
-| 2 | No mocks, placeholders or fake data | met. `data/api-snapshot.json` is parsed from Blizzard's live docs |
-| 3 | Real end-to-end run on real input | met. Worked example, 8 fixtures, 4,483-file corpus, clean-path install, action with no node_modules |
-| 4 | Handles bad input, missing files, empty results, network failure | met. Missing `.toc` entry warns and continues; unparseable file exits 2; unknown flags, unknown rule ids, missing snapshot and a dead network all give one-line messages with no stack trace |
-| 5 | Tests covering the core path | met. `npm test`, 123 passing |
-| 6 | Publish-ready packaging | met. package.json complete, bin wired, LICENSE (MIT), .gitignore, `action.yml` description is 70 chars (under the 125-char Marketplace limit) |
-| 7 | README a stranger can follow | met, with real pasted output and the measured false-positive count |
-| 8 | Version 1.0.0 | met |
-
-## House-rules review (post-build)
-
-Ran the mandated difflib check over all 61 functions in `src/`, `bin/` and `action/`. Nothing was above the 60% clone threshold, but three genuine shared mechanisms were duplicated and are now extracted:
-
-- **One `walk(node, visit)`** replaces three hand-rolled AST traversals (`collectGuardedPaths`, the return-taint scan, and the parameter-guard scan), plus a shared `guardedPathsOf` that both guard scans now call. Highest pairwise similarity fell from 51% to 32%.
-- **`lintPaths()` in `src/index.mjs`** replaces the run-and-merge loop that the CLI and the Action each had their own copy of (20 verbatim duplicated lines). `bin` vs `action` whole-file similarity fell from 21% to 12%.
-- Dead code removed: unused `GUARDS`/`GUARD_METHODS` imports left over from the guard-wrapper refactor, an unread `Scope.fnBoundary` field, and an unused `TOC_SUFFIXES` constant.
-
-Proved as a pure refactor rather than argued: 20 real outputs were recorded before the change (all fixtures at `--conditional` off/warn/error, all 15 corpus repos, `--rules`, `--help`, the parse-error path, and the Action entrypoint) and re-recorded after. **`diff -r` reports identical.** 123 tests still pass and the packed tarball still runs from a clean path.
-
-Also checked: zero em dashes in any outward-facing file, no comment block over two lines outside the file headers, no TODO/FIXME/placeholder on any path, and `action.yml`'s description is 70 characters.
-
-## Shipped
-
-| Step | Result |
-| --- | --- |
-| GitHub repo | https://github.com/Booyaka101/wow-secret-lint, public, 7 topics |
-| CI on the release commit `498fd61` | all 5 checks green (ubuntu/windows x node 20/22, plus the Action running on itself) |
-| npm | `wow-secret-lint@1.0.0`, published, registry resolved in ~8s |
-| Tags | `v1.0.0` and `v1` pushed |
-| Release | https://github.com/Booyaka101/wow-secret-lint/releases/tag/v1.0.0 |
-| Public install proof | `npm install wow-secret-lint` in a clean dir, ran the worked example, correct output, exit 1 |
-
-## Left for the owner
-
-**The GitHub Actions Marketplace listing.** `github.com/marketplace/actions/wow-secret-lint` is still 404. The first listing is UI-only: open the release edit page, tick "Publish this Action to the GitHub Marketplace", pick category **Code quality**, and clear the sudo interstitial. It needs a second factor out of your mailbox, so it was left to you rather than automated. Everything it depends on is already correct: `action.yml` has name, description (70 chars, under the 125 limit), author, and branding icon/colour, and the `v1` tag exists.
-
-Once listed, later releases pick themselves up automatically; the sudo wall is only on the first listing.
-
-**Provenance.** 1.0.0 was published from an authenticated local npm session, so it carries no provenance attestation, and npm does not allow republishing a version. To get provenance from 1.0.1 onward, either add an `NPM_TOKEN` secret (classic Automation token, never expires) and publish from a workflow with `--provenance`, or set up npm Trusted Publishing for the package. Both are behind npm's 2FA wall, so both are owner-operated.
-
-## Best first distribution step
-
-A short reply on [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121) and [aura-questor#68](https://github.com/lucascodev/aura-questor/issues/68). Both are open, both are people hitting this exact trace right now, and both are already fixtures in the repo so the reply can be concrete about what it catches. Better reach than a self-promo post, and it does not trip low-effort rules.
-
-## Open question that 1.0.1 documents rather than answers
-
-The Secret Values page says `SecretReturns = true` means the function "unconditionally return[s] secret values", so the error tier follows the documentation. But DeadlyBossMods, BigWigs, Details and WeakAuras have **zero** issues mentioning `UnitHealth` and secret values, and this tool flags 66 `UnitHealth`-derived errors across them. If the documented reading were literally true at runtime, DBM would be throwing on every boss pull for millions of users.
-
-Candidate explanations, currently indistinguishable from here: the documented wording is narrower in practice; the reports go to Discord and CurseForge instead of GitHub; or some flagged paths are Classic-flavour code that never runs on retail (true for at least some SpartanUI hits).
-
-1.0.1 does not guess. It corrects the README claim from "0 false positives" to "none contradicts the documented rule", adds a section spelling out the tension, and points users at `WSL008` as the rule to trust unconditionally.
-
-**Resolving it needs one in-game observation**, which static analysis cannot supply. Until then do not promote the error tier as "this will break your addon", and do not list on the Marketplace or post to the issue trackers on the strength of it.
-
-**Do not repeat the original mistake:** I verified the rule against Blizzard's documentation and reported that as a false-positive rate. Those are different claims. A doc marker is a claim about intent; only the runtime is a claim about behaviour.
-
-## 1.1.0, the recast
-
-The tool printed `error` on findings resting on `SecretReturns = true`, which I could not confirm error in game. One word, and it turned an inventory into a verdict. That is what made 1.0.0 overclaim.
-
-Now: `WSL008` is the only rule that fails a build by default, because combat log registration failure is documented and deterministic. Everything resting on `SecretReturns` reports as a warning, with `--strict` to raise it. The implementation is one line in `report()`, plus wiring, and rules with no taint behind them are untouched.
-
-Measured on the same 12-addon corpus:
-
-| Mode | Errors | Warnings | Addons that would fail CI |
-| --- | --- | --- | --- |
-| default | 22 | 96 | 4 of 12 |
-| `--strict` | 118 | 0 | 6 of 12 |
-
-All 22 default errors are `WSL008`. The point of the recast is that the default is now correct under either reading of the docs, which is the property 1.0.0 lacked.
-
-Regression fixtures assert under `strict: true`, since they document contradictions of the documented rule. 127 tests.
-
-Two process notes worth keeping. A patch script asserted mid-way and wrote nothing, so a later step silently no-oped and `--strict` parsed but never reached the analyser; only asserting on every replace caught it. And a naive `.findings;` replacement landed a paren in the wrong place and produced a syntax error, caught by the suite rather than by review.
-
-### Still open
-
-- Classic-flavour contamination in the 118 is real and unquantified. Next measurement.
-- No in-game confirmation of whether `SecretReturns` APIs are secret on every call. Everything above is built so that answer no longer changes whether the default is correct.
-- Marketplace listing and the two issue comments remain held.
-
-## 1.2.0, the contamination measurement and the bug it found
-
-Measured the Classic contamination in the 118 strict findings by resolving every retail `.toc` in each repo and matching the file lists against the findings. Retail interface ids have six digits (120001); every Classic flavour uses five (11507, 40402, 50504), which is a clean discriminator.
-
-**Result: 8 of 118, 6.8%. All of them WeakAuras. None of them SpartanUI.**
-
-My SpartanUI hypothesis was wrong and I had asserted it twice without checking. Its single `SpartanUI.toc` declares `## Interface: 120100, 50504, 38002, 20506, 11509`, a multi-flavour toc, so `libs/oUF_Classic` and `libs/LibClassicDurations` are listed for retail too. Those findings are legitimate.
-
-The eight were a defect in this tool, not the corpus. WeakAuras keeps its tocs in a `WeakAuras/` subdirectory and ships only `_Cata`, `_Mists`, `_TBC`, `_Vanilla` and `_Wrath` variants. `findTocFiles` at the repo root found nothing, the code fell back to `collectLuaFiles`, and that walks every `.lua` while ignoring flavour entirely. Pointing the tool at any repo whose addon lives one level down silently abandoned the whole `.toc` mechanism, including the Classic filtering the README promises.
-
-Fixed in `findTocFilesDeep` plus `isRetailToc`:
-
-- no `.toc` at the top level means descend up to three levels before giving up
-- a `.toc` is retail when any `## Interface` id is >= 100000; packager tokens like `@toc-version-retail@` count as retail rather than being silently dropped
-- a folder whose every `.toc` targets Classic is skipped with a message instead of scanned
-- the blind walk still exists for folders with no `.toc` anywhere, and now announces itself
-
-Re-measured after the fix:
-
-| Mode | Errors | Warnings | Addons that would fail CI |
-| --- | --- | --- | --- |
-| default | 20 | 90 | 3 of 12 |
-| `--strict` | 110 | 0 | 5 of 12 |
-
-118 to 110 is exactly the eight. Re-running the contamination check reports **0 of 110**, every finding reachable from a retail `.toc`. LittleWigs still resolves 752 files, so nested discovery did not regress the existing path. 132 tests.
-
-Third time the same shell trap landed: `
-` inside a python heredoc arrives as a real newline through the Bash tool and produced an unparseable test file. Rewrote the block with backtick template literals, where real newlines are legal, which sidesteps the escaping entirely. That is the durable fix, not more careful escaping.
-
-### Still open
-
-- No in-game confirmation of whether `SecretReturns` APIs are secret on every call. The default is built so this no longer changes whether it is correct.
-- Marketplace listing and the two issue comments remain held.
-
-## Marketplace listing: attempted, not completed
-
-Drove the release edit page over CDP. Everything up to the second factor is done and correct:
-
-- `Publish this Action to the GitHub Marketplace` ticked
-- primary category **Code quality** (12), secondary **Continuous integration** (2)
-- no validation errors; `action.yml` passes (description is 70 chars, under the 125 limit)
-- `Update release` submitted, which correctly triggered GitHub's sudo interstitial
-
-The sudo step failed three times and I stopped rather than keep burning attempts. Two mistakes, both mine:
-
-1. The Gmail tab was parked on a permalink to the **previous** sudo email from the rimpatch listing on Aug 23. Clicking the top row and reading the page body returned that stale message, so the first code was a day old. The subjects are identical, so nothing about the row text gave it away.
-2. After the failure I clicked `Verify via email` again. That invalidated the still-valid 11:36 code and GitHub sent no replacement; twelve polls over two minutes showed no new mail. The mailer is rate-limited, so a retry click leaves you with zero valid codes.
-
-Nothing was damaged. The release is published and not a draft, the repo is public with 7 topics, npm is on 1.2.0, 132 tests pass. The Marketplace change simply was not saved, because GitHub only replays the pending POST after sudo succeeds.
-
-Second attempt at 12:25 hit the same wall with a cleaner measurement. Five mailer triggers across the hour produced exactly three mails (11:36, 11:40, 11:43) and then nothing, checked against `in:anywhere` so it is not spam filtering. The cooldown is still in force 40+ minutes later. Gmail's own lag masked it: the 11:40 mail did not appear in the list until 12:24.
-
-Everything before the second factor automates cleanly and was re-verified on the second run: checkbox ticked, Code quality primary, Continuous integration secondary, no validation errors, `Update release` submitted, sudo interstitial reached, `#sudo_email_otp` present. The only missing input is a code GitHub will not currently send.
-
-**To finish it**, from a browser already signed in: open https://github.com/Booyaka101/wow-secret-lint/releases/edit/v1.2.0, tick the Marketplace checkbox, pick Code quality, click Update release, then enter the emailed code. One code, one attempt; re-clicking the trigger destroys the outstanding code.
-
-## Incident: scheduled refresh workflow failed, then a real workflow bug found underneath
-
-The weekly "Refresh API snapshot" workflow ran automatically and failed: `GitHub Actions is not permitted to create or approve pull requests`, a repo default I never checked when writing the workflow. Fixed by enabling `default_workflow_permissions=write` and `can_approve_pull_request_reviews` via the API, then re-ran the workflow by hand rather than assuming the setting change worked.
-
-That surfaced a real bug. PR #1 was created successfully but was a no-op: diffed the snapshot field by field and every function/structure entry was byte-identical to what is already committed, only the `generated` timestamp differed. Left unfixed, the workflow would have opened an empty PR every single week forever. Closed PR #1 rather than merge nothing, and added `scripts/skip-if-unchanged.mjs`, wired in right after `--refresh`, which reverts the file when only its volatile fields changed so `create-pull-request` correctly opens nothing.
-
-Verified end-to-end against live data, not just unit tests: ran `--refresh` twice and confirmed the script reverts the resulting timestamp-only diff; hand-edited `functionCount` and confirmed it leaves a genuine change alone.
-
-The script's own CLI-entry guard had a bug caught only by running it: a hand-built `file://${path}` string is missing the third slash `file:///` needs before a Windows drive letter, so the whole CLI branch was silently dead. Fixed with `pathToFileURL`. Tests run the exported pure functions against a throwaway git repo, not the real tracked snapshot, because an earlier draft raced `test/snapshot.test.mjs` by mutating the committed file while vitest ran files in parallel.
-
-Also hit and documented a path trap: Git Bash's `/tmp` and Windows `node.exe`'s own resolution of a leading-slash path are different directories, so a file written by one and read by the other can silently be empty or stale. Diffing against an explicit `D:/tmp/...` path fixed it.
-
-136 tests was the wrong count committed in the fix message; it's 138.
-
-## Marketplace listing: LIVE
-
-https://github.com/marketplace/actions/wow-secret-lint returns 200, listed under **Code quality** at v1.2.0. It was 404 for the whole afternoon before this.
-
-The blocker was never the form, it was the second factor. Everything up to sudo automated cleanly and the pending POST survived: I filled and submitted the form (checkbox, Code quality primary, Continuous integration secondary), the owner cleared sudo, and GitHub replayed my submit an hour later with the categories intact.
-
-**Root cause of the afternoon, and I had it wrong twice.** I blamed rate limiting, then Gmail lag. The real answer is that GitHub's sudo *email* path is unusable here: six triggers produced three mails, every one delivered 45 to 90 minutes late, so every one was past its 15-minute window on arrival. Meanwhile a **"Use your authenticator app"** button sat on the same page the entire time and finished the job in seconds once the owner used it. I should have enumerated the options on that page before committing to one.
-
-LESSONS.md is rewritten accordingly: check for the TOTP button first, fall back to email only if unavailable, and never re-click the email trigger since that invalidates the outstanding code without sending a replacement.
-
-## Final verified state
-
-| Thing | State |
-| --- | --- |
-| npm | `wow-secret-lint@1.2.0`, `latest` |
-| GitHub release | v1.2.0, not a draft, tags `v1.2.0` and `v1` both at `675327c` |
-| Marketplace | live, Code quality, v1.2.0 |
-| Repo | public, 7 topics |
-| CI | green on the release commit, all 5 checks |
-| Tests | 138 passing |
-| Working tree | clean, in sync with origin |
-
-### Genuinely still open
-
-- **No in-game confirmation** of whether `SecretReturns` APIs hand a secret to tainted code on every call. The default is deliberately built so this does not decide whether the tool is correct: only `WSL008` gates a build, everything resting on `SecretReturns` is a warning behind `--strict`. The README asks for exactly this one data point.
-- **The two issue comments are still unposted**, held on the house rule that the owner owns final wording. Drafts are in the session transcript.
-- **No provenance** on any published version. 1.0.0 can never have it; later versions need an `NPM_TOKEN` secret or npm Trusted Publishing, both behind npm's own 2FA wall.
+- Marketplace listing is LIVE under Code quality. Lesson recorded: check for the TOTP "Use your authenticator app" button before the email second factor; never re-click the email trigger.
+- No provenance on published versions; needs `NPM_TOKEN` or npm Trusted Publishing, both behind npm 2FA, owner-operated.
+- **No in-game confirmation** of whether `SecretReturns` APIs hand a secret to tainted code on every call. The default is built so this does not decide whether the tool is correct. The README asks for exactly this one data point.
+- The two issue comments (KkthnxUI#121, aura-questor#68) remain unposted, held on the house rule that the owner owns final wording.

@@ -3,6 +3,10 @@
 
 const WIKI = 'https://warcraft.wiki.gg/wiki/Secret_Values';
 const PATCH = 'https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes';
+const PATCH121 = 'https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes';
+
+export const PATCHES = ['12.0', '12.1'];
+export const DEFAULT_PATCH = '12.1';
 
 export const RULES = {
   WSL001: {
@@ -59,6 +63,42 @@ export const RULES = {
     severity: 'warning',
     summary: 'tostring() on a secret value',
     source: `Inferred. tostring is absent from the allowed list on ${WIKI} and is not documented as forbidden either; kept a warning until confirmed in game.`,
+  },
+  WSL012: {
+    severity: 'error',
+    patch: '12.1',
+    summary: 'forbidden operation on a secret aura vector',
+    source: `${PATCH121} : "when auras are secret (during combat, encounters, M+, and PvP matches), all of the UnitAura APIs will now either return full secrets or nil when called by addons. That means that APIs like GetUnitAuras and GetUnitAuraInstanceIDs will return a secret vector, meaning addon code will not be able to determine how many auras it contains or iterate through it for display."`,
+  },
+  WSL013: {
+    severity: 'error',
+    patch: '12.1',
+    summary: 'forbidden operation on a secret unit identity value',
+    source: `${PATCH121} : "A number of Unit APIs have been changed to return secret values when the unit's identity is secret", naming UnitClass, UnitClassBase, UnitRace, UnitSex and UnitSexBase; "UnitIsCharmed and UnitIsPossessed APIs now return secret values when auras are secret."`,
+  },
+  WSL014: {
+    severity: 'error',
+    patch: '12.1',
+    summary: 'symbol removed or renamed in 12.1',
+    source: `${PATCH121} : "UIParentLoadAddOn has been renamed to LoadAddOnWithErrorHandling." / "CanAccessObject has been replaced with FrameScriptObject:CanBeAccessedInContext." / "SecureAuraHeaderTemplate has been removed from Mainline"; C_UnitAuras.TriggerPrivateAuraShowDispelType is in the Removed list.`,
+  },
+  WSL015: {
+    severity: 'warning',
+    patch: '12.1',
+    summary: 'deprecated getglobal/setglobal',
+    source: `${PATCH121} : "Deprecated getglobal and setglobal."`,
+  },
+  WSL016: {
+    severity: 'warning',
+    patch: '12.1',
+    summary: 'showCountdownFrame passed to a private-aura API',
+    source: `${PATCH121} : showCountdownFrame was removed from AddPrivateAuraAnchorArgs and UnitPrivateAuraAnchorInfo, replaced by showCooldownFrame, showCooldownEdge and showDispelIcon. The field is silently ignored, so the cooldown swipe stops appearing with no Lua error.`,
+  },
+  WSL017: {
+    severity: 'error',
+    patch: '12.1',
+    summary: 'forbidden-aspect operation on an AuraButton or AuraContainer',
+    source: `${PATCH121} : "Aura Buttons have had the following Forbidden Aspects applied to them: UntrustedScriptExecution, UntrustedLayoutScriptExecution, AlwaysPropagateInput, ScriptedInput, and QueryFocus" / "Aura Containers have had the EventRegistrations Forbidden Aspect applied to them."`,
   },
 };
 
@@ -136,6 +176,143 @@ const NON_BOOL_TYPES = new Set([
   'textureAtlas',
   'textureKit',
 ]);
+
+// ------------------------------------------------------------- patch 12.1 surface
+//
+// None of this is in Blizzard's generated documentation. Aura secrecy is behavioural
+// ("when auras are secret ... return full secrets or nil"), documented only in the 12.1
+// patch notes, so the snapshot cannot carry it and these lists seed the taint instead.
+
+/**
+ * APIs whose returns are a secret aura vector or secret aura data in 12.1. Taints they
+ * produce carry category 'aura' and report as WSL012. Bare names are listed too because
+ * the snapshot registers global aliases for namespaced functions.
+ */
+export const AURA_SECRET_APIS = new Set(
+  [
+    'C_UnitAuras.GetUnitAuras',
+    'C_UnitAuras.GetUnitAuraInstanceIDs',
+    'C_UnitAuras.GetAuraSlots',
+    'C_UnitAuras.GetAuraDataByIndex',
+    'C_UnitAuras.GetAuraDataBySlot',
+    'C_UnitAuras.GetAuraDataByAuraInstanceID',
+    'C_UnitAuras.GetBuffDataByIndex',
+    'C_UnitAuras.GetDebuffDataByIndex',
+    // "all of the UnitAura APIs" per the 12.1 notes, so the by-spell lookups too.
+    'C_UnitAuras.GetAuraDataBySpellName',
+    'C_UnitAuras.GetUnitAuraBySpellID',
+    'C_UnitAuras.GetPlayerAuraBySpellID',
+    'C_UnitAuras.GetCooldownAuraBySpellID',
+  ].flatMap((n) => [n, n.slice(n.indexOf('.') + 1)])
+);
+
+/** Unit APIs the 12.1 notes name as returning secrets. Category 'identity', rule WSL013. */
+export const IDENTITY_SECRET_APIS = new Set([
+  'UnitClass',
+  'UnitClassBase',
+  'UnitRace',
+  'UnitSex',
+  'UnitSexBase',
+  'UnitIsCharmed',
+  'UnitIsPossessed',
+]);
+
+/**
+ * Literal unit tokens that keep identity APIs non-secret. The 12.1 notes state it for
+ * UnitIsCharmed/UnitIsPossessed ("no longer return secret values if the unit token passed
+ * is 'player', 'pet', or 'vehicle'"); for the rest only "player" is exempted, because the
+ * change exists to stop addons comparing secret units and a unit is never secret to itself.
+ */
+export const SELF_EXEMPT_TOKENS = new Set(['player', 'pet', 'vehicle']);
+export const AURA_STATE_IDENTITY_APIS = new Set(['UnitIsCharmed', 'UnitIsPossessed']);
+
+/** Operator findings on a categorised taint report as the 12.1 rule instead. */
+export const CATEGORY_RULES = { aura: 'WSL012', identity: 'WSL013' };
+
+/** Iterating a secret vector cannot work; flagged for categorised taints only. */
+export const ITERATORS = new Set(['pairs', 'ipairs', 'next', 'unpack']);
+
+export const AURA_SUGGESTION =
+  'show auras with an AuraContainer (AddAuraGroup/AddAuraSlot) instead';
+
+/** Calls removed, renamed or deprecated in 12.1, with the replacement each message names. */
+export const REMOVED_CALLS = {
+  UIParentLoadAddOn: {
+    ruleId: 'WSL014',
+    message: 'UIParentLoadAddOn() was renamed in 12.1; call LoadAddOnWithErrorHandling() instead',
+  },
+  CanAccessObject: {
+    ruleId: 'WSL014',
+    message: 'CanAccessObject() was removed in 12.1; use FrameScriptObject:CanBeAccessedInContext() instead',
+  },
+  'C_UnitAuras.TriggerPrivateAuraShowDispelType': {
+    ruleId: 'WSL014',
+    message:
+      'C_UnitAuras.TriggerPrivateAuraShowDispelType() was removed in 12.1; use the showDispelIcon option on private aura anchors instead',
+  },
+  getglobal: {
+    ruleId: 'WSL015',
+    message: 'getglobal() is deprecated in 12.1; use _G[name] instead',
+  },
+  setglobal: {
+    ruleId: 'WSL015',
+    message: 'setglobal() is deprecated in 12.1; use _G[name] = value instead',
+  },
+};
+
+export const REMOVED_TEMPLATE = 'SecureAuraHeaderTemplate';
+export const REMOVED_TEMPLATE_MESSAGE =
+  'SecureAuraHeaderTemplate was removed from Mainline in 12.1; migrate to an AuraContainer (AddAuraGroup/AddAuraSlot)';
+
+/** Structure fields renamed in 12.1 whose old name is silently ignored at runtime. */
+export const RENAMED_STRUCT_FIELDS = {
+  showCountdownFrame: 'showCooldownFrame',
+};
+
+/** CreateFrame frame types that carry Forbidden Aspects from creation. */
+export const ASPECT_FRAME_TYPES = new Set(['AuraContainer', 'AuraButton']);
+
+/** Container methods whose options table hands AuraButtons to an initializeFrame callback. */
+export const AURA_GROUP_METHODS = new Set(['AddAuraGroup', 'AddAuraSlot', 'AddItemEnchantment']);
+
+/**
+ * Methods disallowed by the Forbidden Aspects each frame type carries. Buttons additionally
+ * get event registration flagged: they join the container's forbidden partition and the 12.1
+ * announcement says addons cannot "register events on those buttons".
+ */
+const BUTTON_SCRIPTS = { aspect: 'UntrustedScriptExecution', verb: 'installing a script handler' };
+const EVENT_REG = { aspect: 'EventRegistrations', verb: 'registering for events' };
+const INPUT_CALL = { aspect: 'ScriptedInput', verb: 'calling an input API' };
+const FOCUS_QUERY = { aspect: 'QueryFocus', verb: 'querying focus' };
+
+export const FORBIDDEN_ASPECT_METHODS = {
+  AuraButton: {
+    SetScript: BUTTON_SCRIPTS,
+    HookScript: BUTTON_SCRIPTS,
+    RegisterEvent: EVENT_REG,
+    RegisterUnitEvent: EVENT_REG,
+    RegisterAllEvents: EVENT_REG,
+    Click: INPUT_CALL,
+    SetFocus: INPUT_CALL,
+    EnableMouse: INPUT_CALL,
+    EnableKeyboard: INPUT_CALL,
+    EnableMouseWheel: INPUT_CALL,
+    EnableGamePadButton: INPUT_CALL,
+    EnableGamePadStick: INPUT_CALL,
+    SetPropagateKeyboardInput: INPUT_CALL,
+    SetPassThroughButtons: INPUT_CALL,
+    RegisterForClicks: INPUT_CALL,
+    RegisterForDrag: INPUT_CALL,
+    IsMouseOver: FOCUS_QUERY,
+    IsMouseMotionFocus: FOCUS_QUERY,
+    HasFocus: FOCUS_QUERY,
+  },
+  AuraContainer: {
+    RegisterEvent: EVENT_REG,
+    RegisterUnitEvent: EVENT_REG,
+    RegisterAllEvents: EVENT_REG,
+  },
+};
 
 /**
  * Decide how a boolean test on a secret should be reported.
