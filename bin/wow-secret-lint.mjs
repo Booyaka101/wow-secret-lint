@@ -7,7 +7,7 @@ import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
 import { refreshSnapshot, writeSnapshot, SNAPSHOT_PATH } from '../src/apidata.mjs';
-import { RULES, RULE_IDS } from '../src/rules.mjs';
+import { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH } from '../src/rules.mjs';
 
 const USAGE = `wow-secret-lint ${VERSION}
 Static analysis for World of Warcraft retail addons: finds Secret Value violations
@@ -21,6 +21,9 @@ Usage:
 Options:
   --format=<stylish|json|github>  output format (default: stylish)
   --game=<retail|classic>         classic has no secret values and exits 0 immediately
+  --patch=<12.0|12.1>             which patch surface the built-in rules check
+                                  (default: 12.1). 12.0 pins the pre-12.1 rule set for
+                                  addons still targeting the older client
   --strict                        raise SecretReturns findings from warning to error.
                                   Off by default: see "the open question on severity"
                                   in the README before you gate CI on them.
@@ -52,6 +55,7 @@ function parseArgs(argv) {
   const opts = {
     format: 'stylish',
     game: 'retail',
+    patch: DEFAULT_PATCH,
     conditional: 'off',
     strict: false,
     disable: [],
@@ -78,6 +82,7 @@ function parseArgs(argv) {
     else if (arg === '--strict') opts.strict = true;
     else if (arg.startsWith('--format')) opts.format = value(arg, argv, () => i++);
     else if (arg.startsWith('--game')) opts.game = value(arg, argv, () => i++);
+    else if (arg.startsWith('--patch')) opts.patch = value(arg, argv, () => i++);
     else if (arg.startsWith('--conditional')) opts.conditional = value(arg, argv, () => i++);
     else if (arg.startsWith('--secret-guard')) opts.secretGuards.push(...value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean));
     else if (arg.startsWith('--access-guard')) opts.accessGuards.push(...value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean));
@@ -152,6 +157,7 @@ async function main() {
 
   if (!FORMATS.includes(opts.format)) fail(`unknown format "${opts.format}" (expected one of: ${FORMATS.join(', ')})`);
   if (!['retail', 'classic'].includes(opts.game)) fail(`unknown game "${opts.game}" (expected retail or classic)`);
+  if (!PATCHES.includes(opts.patch)) fail(`unknown --patch "${opts.patch}" (expected ${PATCHES.join(' or ')})`);
   if (!['warn', 'error', 'off'].includes(opts.conditional)) {
     fail(`unknown --conditional "${opts.conditional}" (expected warn, error or off)`);
   }
@@ -175,6 +181,7 @@ async function main() {
   try {
     merged = await lintPaths(opts.paths, {
       game: opts.game,
+      patch: opts.patch,
       conditional: opts.conditional,
       strict: opts.strict,
       disable: opts.disable,

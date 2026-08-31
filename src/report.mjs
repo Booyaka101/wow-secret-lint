@@ -54,6 +54,7 @@ export function formatJson(result) {
   return JSON.stringify(
     {
       version: result.version,
+      patch: result.patch,
       snapshot: {
         source: result.snapshot.source,
         generated: result.snapshot.generated,

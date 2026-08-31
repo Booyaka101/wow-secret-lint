@@ -5,14 +5,15 @@ import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
 import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
+import { DEFAULT_PATCH } from './rules.mjs';
 
-export { RULES, RULE_IDS } from './rules.mjs';
+export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH } from './rules.mjs';
 export { analyzeSource } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -20,6 +21,7 @@ export const VERSION = '1.2.0';
  * @param {string} target       path to an addon folder, a .toc, or a .lua file
  * @param {object} options
  * @param {'retail'|'classic'} options.game
+ * @param {'12.0'|'12.1'} options.patch  which patch surface the built-in rules check (default 12.1)
  * @param {'warn'|'error'|'off'} options.conditional  how to treat conditionally secret APIs
  * @param {string[]} options.disable  rule ids to silence
  * @param {string[]} options.secretGuards  extra is-secret wrapper names, e.g. IsSecret
@@ -35,6 +37,7 @@ export async function lint(target, options = {}) {
     version: VERSION,
     target,
     game,
+    patch: options.patch ?? DEFAULT_PATCH,
     filesScanned: 0,
     findings: [],
     parseErrors: [],
@@ -121,6 +124,7 @@ export async function lint(target, options = {}) {
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
     strict: options.strict === true,
+    patch: options.patch,
   };
 
   for (const file of files) {
@@ -152,6 +156,7 @@ export function byLocation(a, b) {
 export async function lintPaths(paths, options = {}) {
   const merged = {
     version: VERSION,
+    patch: options.patch ?? DEFAULT_PATCH,
     filesScanned: 0,
     findings: [],
     parseErrors: [],

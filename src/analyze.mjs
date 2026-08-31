@@ -19,6 +19,21 @@ import {
   COMBAT_LOG_EVENTS,
   COMBAT_LOG_REPLACEMENT,
   booleanTestSeverity,
+  DEFAULT_PATCH,
+  AURA_SECRET_APIS,
+  IDENTITY_SECRET_APIS,
+  SELF_EXEMPT_TOKENS,
+  AURA_STATE_IDENTITY_APIS,
+  CATEGORY_RULES,
+  ITERATORS,
+  AURA_SUGGESTION,
+  REMOVED_CALLS,
+  REMOVED_TEMPLATE,
+  REMOVED_TEMPLATE_MESSAGE,
+  RENAMED_STRUCT_FIELDS,
+  ASPECT_FRAME_TYPES,
+  AURA_GROUP_METHODS,
+  FORBIDDEN_ASPECT_METHODS,
 } from './rules.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
@@ -86,6 +101,10 @@ class Analyzer {
     this.bindingSeq = 0;
     this.callDepth = 0;
     this.analysedWithTaint = new Set();
+    this.patch121 = options.patch !== '12.0';
+    this.widgetOf = new Map(); // dotted path -> 'AuraContainer' | 'AuraButton'
+    this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
+    this.guardArgDepth = 0; // > 0 while evaluating the arguments of a guard or scrubber call
   }
 
   // ---------------------------------------------------------------- findings
@@ -100,8 +119,13 @@ class Analyzer {
     // Findings that rest on SecretReturns report as warnings unless --strict. Whether those
     // APIs really hand a secret to tainted code on every call is unconfirmed in game, so the
     // default is an inventory of exposure, not a verdict. Rules with no taint behind them
-    // (WSL008) are deterministic and keep their severity.
-    if (taint && taint.kind === 'secret' && sev === 'error' && !this.options.strict) sev = 'warning';
+    // (WSL008, WSL014-017) are deterministic and keep their severity, as do the 12.1 aura
+    // and identity rules: the patch notes state the secrecy outright and every player enters
+    // the states that activate it.
+    const patchBreaking = ruleId === 'WSL012' || ruleId === 'WSL013';
+    if (taint && taint.kind === 'secret' && sev === 'error' && !this.options.strict && !patchBreaking) {
+      sev = 'warning';
+    }
     if (this.options.disable.has(ruleId)) return;
     const p = pos(node);
     const key = `${ruleId}:${p.line}:${p.column}`;
@@ -123,6 +147,12 @@ class Analyzer {
   describe(taint) {
     if (!taint) return 'a secret value';
     const name = taint.label ? `'${taint.label}' ` : '';
+    if (taint.category === 'aura') {
+      return `${name}derives from ${taint.origin}(), secret in 12.1 while auras are secret (combat, encounters, M+, PvP); ${AURA_SUGGESTION}`;
+    }
+    if (taint.category === 'identity') {
+      return `${name}derives from ${taint.origin}(), whose returns are secret in 12.1 while the unit's identity is secret`;
+    }
     if (taint.kind === 'conditional') {
       const why = taint.conditions && taint.conditions.length ? taint.conditions.join(', ') : 'a runtime restriction';
       return `${name}derives from ${taint.origin}() (conditionally secret: ${why})`;
@@ -156,7 +186,7 @@ class Analyzer {
 
   // ------------------------------------------------------------------ taint
 
-  makeTaint({ kind, origin, type, conditions, structure, label, bindingId, container }) {
+  makeTaint({ kind, origin, type, conditions, structure, label, bindingId, container, category }) {
     return {
       kind,
       origin,
@@ -165,9 +195,16 @@ class Analyzer {
       structure: structure ?? null,
       // A documented structure is not itself a secret; its unmarked fields are.
       container: container === true,
+      // 'aura' or 'identity' reroutes operator findings to WSL012/WSL013.
+      category: category ?? null,
       label: label ?? null,
       bindingId: bindingId ?? null,
     };
+  }
+
+  /** Operator findings on a categorised taint report as the 12.1 rule for that category. */
+  ruleFor(defaultId, taint) {
+    return taint && taint.category ? CATEGORY_RULES[taint.category] : defaultId;
   }
 
   /** Resolve the callee of a CallExpression to a documented API name, or null. */
@@ -191,6 +228,18 @@ class Analyzer {
   /** Taint carried by return position `index` (0-based) of a documented API call. */
   returnTaint(name, entry, index, node) {
     const ret = entry.returns && entry.returns[index] ? entry.returns[index] : null;
+    // Aura secrecy is behavioural, so the generated docs carry no marker for it and the
+    // 12.1 lists seed it here, ahead of the snapshot's own annotations. All return
+    // positions are secret, and no structure is recorded because the value is a full
+    // secret: reading a field of it is itself the violation.
+    if (this.patch121) {
+      if (AURA_SECRET_APIS.has(name)) {
+        return this.makeTaint({ kind: 'secret', origin: name, type: ret ? ret.type : null, category: 'aura' });
+      }
+      if (IDENTITY_SECRET_APIS.has(name) && !selfExempt(name, node)) {
+        return this.makeTaint({ kind: 'secret', origin: name, type: ret ? ret.type : null, category: 'identity' });
+      }
+    }
     if (ret && ret.neverSecret) return null;
     const type = ret ? ret.type : null;
     const structure = type && this.api.structures[type] ? type : null;
@@ -338,6 +387,14 @@ class Analyzer {
         if (recv) paths.push(recv);
       }
       if (!paths.length) return empty;
+      // An aura is secret or readable as a unit, so a guard naming one field of a
+      // category-tainted value (issecretvalue(aura.name)) vouches for the whole value.
+      for (const p of [...paths]) {
+        const root = p.split('.')[0];
+        if (root === p) continue;
+        const t = scope.get(root);
+        if (t && t.category) paths.push(root);
+      }
       const marks = paths.map((p) => ({ path: p, prefix: g.prefix }));
       return g.safeWhen ? { whenTrue: marks, whenFalse: [] } : { whenTrue: [], whenFalse: marks };
     }
@@ -544,14 +601,14 @@ class Analyzer {
         if (t.type === 'MemberExpression' || t.type === 'IndexExpression') {
           const baseTaint = this.taintOf(t.base, scope);
           if (baseTaint && !baseTaint.container && !baseTaint.structure) {
-            this.report('WSL005', t, `indexed assignment on a secret value: ${this.describe(baseTaint)}`, {
+            this.report(this.ruleFor('WSL005', baseTaint), t, `indexed assignment on a secret value: ${this.describe(baseTaint)}`, {
               taint: baseTaint,
             });
           }
           if (t.type === 'IndexExpression') {
             const keyTaint = this.taintOf(t.index, scope);
             if (keyTaint) {
-              this.report('WSL005', t.index, `secret value used as a table key: ${this.describe(keyTaint)}`, {
+              this.report(this.ruleFor('WSL005', keyTaint), t.index, `secret value used as a table key: ${this.describe(keyTaint)}`, {
                 taint: keyTaint,
               });
             }
@@ -595,6 +652,7 @@ class Analyzer {
           this.cleared.delete(path);
         }
       }
+      if (this.patch121) this.trackPatchState(target, i < inits.length ? inits[i] : null);
     });
     return null;
   }
@@ -621,10 +679,10 @@ class Analyzer {
         const t = lt ?? rt;
         if (!t) return;
         if (ARITHMETIC.has(node.operator)) {
-          this.report('WSL001', lt ? node.left : node.right, `arithmetic on a secret value: ${this.describe(t)}`, { taint: t });
+          this.report(this.ruleFor('WSL001', t), lt ? node.left : node.right, `arithmetic on a secret value: ${this.describe(t)}`, { taint: t });
           if (lt && rt) this.markReported(rt);
         } else if (RELATIONAL.has(node.operator)) {
-          this.report('WSL002', lt ? node.left : node.right, `comparison of a secret value: ${this.describe(t)}`, { taint: t });
+          this.report(this.ruleFor('WSL002', t), lt ? node.left : node.right, `comparison of a secret value: ${this.describe(t)}`, { taint: t });
           if (lt && rt) this.markReported(rt);
         } else if (node.operator === '..') {
           // Explicitly allowed by the wiki for string and number secrets.
@@ -648,9 +706,9 @@ class Analyzer {
         const t = this.taintOf(node.argument, scope);
         if (!t) return;
         if (node.operator === '#') {
-          this.report('WSL004', node.argument, `length operator (#) on a secret value: ${this.describe(t)}`, { taint: t });
+          this.report(this.ruleFor('WSL004', t), node.argument, `length operator (#) on a secret value: ${this.describe(t)}`, { taint: t });
         } else if (node.operator === '-') {
-          this.report('WSL001', node.argument, `arithmetic on a secret value: ${this.describe(t)}`, { taint: t });
+          this.report(this.ruleFor('WSL001', t), node.argument, `arithmetic on a secret value: ${this.describe(t)}`, { taint: t });
         } else if (node.operator === 'not') {
           this.booleanTest(node.argument, t);
         }
@@ -662,14 +720,18 @@ class Analyzer {
         if (node.type === 'IndexExpression') this.evaluate(node.index, scope);
         const baseTaint = this.taintOf(node.base, scope);
         if (baseTaint && !baseTaint.container && !baseTaint.structure) {
-          this.report('WSL005', node, `indexed access on a secret value: ${this.describe(baseTaint)}`, {
-            taint: baseTaint,
-          });
+          if (baseTaint.category && this.guardArgDepth > 0) {
+            this.markUse(baseTaint, true);
+          } else {
+            this.report(this.ruleFor('WSL005', baseTaint), node, `indexed access on a secret value: ${this.describe(baseTaint)}`, {
+              taint: baseTaint,
+            });
+          }
         }
         if (node.type === 'IndexExpression') {
           const keyTaint = this.taintOf(node.index, scope);
           if (keyTaint) {
-            this.report('WSL005', node.index, `secret value used as a table key: ${this.describe(keyTaint)}`, {
+            this.report(this.ruleFor('WSL005', keyTaint), node.index, `secret value used as a table key: ${this.describe(keyTaint)}`, {
               taint: keyTaint,
             });
           }
@@ -719,7 +781,7 @@ class Analyzer {
       const target = baseIsMethod ? node.base.base : node.base;
       const t = baseIsMethod ? null : this.taintOf(target, scope);
       if (t && !t.container) {
-        this.report('WSL003', node.base, `call of a secret value as-if it were a function: ${this.describe(t)}`, {
+        this.report(this.ruleFor('WSL003', t), node.base, `call of a secret value as-if it were a function: ${this.describe(t)}`, {
           taint: t,
         });
       }
@@ -727,7 +789,17 @@ class Analyzer {
       else if (node.base.type !== 'Identifier') this.evaluate(node.base, scope);
     }
 
+    // AddAuraGroup and friends hand an AuraButton to their initializeFrame callback, so tag
+    // that parameter before the callback body is analysed, and untag it afterwards.
+    const buttonParams = this.patch121 ? this.tagInitializeFrameParams(callee, args) : [];
+    // `issecretvalue(aura.name)` indexes the aura in order to test it; that read is the
+    // guard idiom DBM and BigWigs ship, not a violation.
+    const guardCall =
+      callee && (this.guardShape(callee) || (!callee.method && SCRUBBERS.has(callee.name)));
+    if (guardCall) this.guardArgDepth += 1;
     for (const a of args) this.evaluate(a, scope);
+    if (guardCall) this.guardArgDepth -= 1;
+    for (const p of buttonParams) this.widgetOf.delete(p);
 
     if (!callee) return;
     const name = callee.name;
@@ -742,7 +814,35 @@ class Analyzer {
       }
     }
 
+    if (this.patch121) {
+      if (!callee.method) {
+        const removed = REMOVED_CALLS[name];
+        if (removed) this.report(removed.ruleId, node, removed.message);
+        if (name === 'CreateFrame') this.checkCreateFrameTemplates(args);
+      } else {
+        const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
+        const widgetType = recv ? this.widgetOf.get(recv) : null;
+        const forbidden = widgetType ? FORBIDDEN_ASPECT_METHODS[widgetType][name] : null;
+        if (forbidden) {
+          this.report(
+            'WSL017',
+            node,
+            `${forbidden.verb} on an ${widgetType} is disallowed by its ${forbidden.aspect} forbidden aspect: ${recv}:${name}()`
+          );
+        }
+      }
+    }
+
     const argTaints = args.map((a) => this.taintOf(a, scope));
+
+    if (this.patch121 && !callee.method && ITERATORS.has(name)) {
+      for (let i = 0; i < args.length; i++) {
+        const t = argTaints[i];
+        if (t && t.category) {
+          this.report(CATEGORY_RULES[t.category], args[i], `iteration with ${name}() over a secret value: ${this.describe(t)}`, { taint: t });
+        }
+      }
+    }
 
     if (!callee.method && SCRUBBERS.has(name)) {
       for (const t of argTaints) this.markUse(t, true);
@@ -762,6 +862,7 @@ class Analyzer {
 
     const entry = callee.method ? null : this.apiEntry(name);
     if (entry) {
+      if (this.patch121) this.checkRenamedStructFields(entry, args);
       const sa = entry.secretArguments;
       for (let i = 0; i < args.length; i++) {
         const t = argTaints[i];
@@ -786,6 +887,93 @@ class Analyzer {
     // Unknown callee (widget method, external library). Blizzard's design allows secrets to
     // flow into widget setters, so this is a tracked-but-unverified use, not a violation.
     for (const t of argTaints) this.markUse(t, false);
+  }
+
+  // ------------------------------------------------------------- patch 12.1 checks
+
+  /** Tag initializeFrame callback parameters as AuraButtons; returns the names to untag. */
+  tagInitializeFrameParams(callee, args) {
+    if (!callee || !callee.method || !AURA_GROUP_METHODS.has(callee.name)) return [];
+    const tagged = [];
+    for (const a of args) {
+      if (!a || a.type !== 'TableConstructorExpression') continue;
+      for (const f of a.fields) {
+        if (f.type !== 'TableKeyString' || f.key.name !== 'initializeFrame') continue;
+        if (!f.value || f.value.type !== 'FunctionDeclaration') continue;
+        const p = f.value.parameters && f.value.parameters[0];
+        if (p && p.type === 'Identifier' && !this.widgetOf.has(p.name)) {
+          this.widgetOf.set(p.name, 'AuraButton');
+          tagged.push(p.name);
+        }
+      }
+    }
+    return tagged;
+  }
+
+  /** WSL014: a CreateFrame template list naming the removed SecureAuraHeaderTemplate. */
+  checkCreateFrameTemplates(args) {
+    for (const a of args) {
+      const s = stringValue(a);
+      if (!s || !s.includes(REMOVED_TEMPLATE)) continue;
+      if (s.split(',').some((part) => part.trim() === REMOVED_TEMPLATE)) {
+        this.report('WSL014', a, REMOVED_TEMPLATE_MESSAGE);
+      }
+    }
+  }
+
+  /**
+   * WSL016: a field 12.1 renamed, passed inside a documented options structure. The old
+   * name is ignored at runtime with no Lua error, which is why it needs a static check.
+   */
+  checkRenamedStructFields(entry, args) {
+    const docArgs = entry.args || [];
+    for (let i = 0; i < args.length && i < docArgs.length; i++) {
+      const struct = docArgs[i] && docArgs[i].type ? this.api.structures[docArgs[i].type] : null;
+      if (!struct || !struct.fields) continue;
+      const passed =
+        args[i].type === 'TableConstructorExpression'
+          ? constructorFields(args[i])
+          : args[i].type === 'Identifier'
+            ? this.tableFields.get(args[i].name)
+            : null;
+      if (!passed) continue;
+      for (const [oldField, newField] of Object.entries(RENAMED_STRUCT_FIELDS)) {
+        if (!Object.prototype.hasOwnProperty.call(struct.fields, newField)) continue;
+        const keyNode = passed.get(oldField);
+        if (keyNode) {
+          this.report(
+            'WSL016',
+            keyNode,
+            `${oldField} was removed from ${docArgs[i].type} in 12.1 and is silently ignored (the cooldown swipe never shows); use ${newField} instead`
+          );
+        }
+      }
+    }
+  }
+
+  /** Keep the path -> widget-type and path -> table-fields maps in step with assignments. */
+  trackPatchState(target, init) {
+    const path = target.type === 'Identifier' ? target.name : this.pathOf(target);
+    if (!path) return;
+    // `args.showCountdownFrame = true` after the constructor still counts as a field.
+    if (target.type === 'MemberExpression') {
+      const fields = this.tableFields.get(this.pathOf(target.base));
+      if (fields) fields.set(target.identifier.name, target);
+    }
+    this.widgetOf.delete(path);
+    this.tableFields.delete(path);
+    if (!init) return;
+    if (init.type === 'TableConstructorExpression') {
+      this.tableFields.set(path, constructorFields(init));
+      return;
+    }
+    if (init.type === 'CallExpression') {
+      const callee = this.calleeName(init);
+      if (callee && !callee.method && callee.name === 'CreateFrame') {
+        const frameType = stringValue(init.arguments[0]);
+        if (frameType && ASPECT_FRAME_TYPES.has(frameType)) this.widgetOf.set(path, frameType);
+      }
+    }
   }
 
   crossBoundary(local, name, args, argTaints, node, scope) {
@@ -898,6 +1086,14 @@ class Analyzer {
 
   booleanTest(node, taint) {
     if (taint.container) return;
+    // The 12.1 aura APIs return a table or nil, never a boolean, and nil-checking the
+    // return is the sanctioned pattern, so a boolean test on aura taint stays silent.
+    // (The AuraData structure left the generated docs in 12.1, so the type lookup below
+    // cannot vouch for it any more.)
+    if (taint.category === 'aura') {
+      this.markUse(taint, true);
+      return;
+    }
     const sev = booleanTestSeverity(taint.type, this.api.structures);
     if (!sev) {
       this.markUse(taint, true);
@@ -907,7 +1103,7 @@ class Analyzer {
       sev === 'error'
         ? `its documented return type is bool`
         : `its documented return type is unknown, so this may be a boolean secret`;
-    this.report('WSL007', node, `boolean test on a secret value (${why}): ${this.describe(taint)}`, {
+    this.report(this.ruleFor('WSL007', taint), node, `boolean test on a secret value (${why}): ${this.describe(taint)}`, {
       severity: sev,
       taint,
     });
@@ -970,6 +1166,27 @@ function exits(body) {
   return !!last && (last.type === 'ReturnStatement' || last.type === 'BreakStatement');
 }
 
+/** True when a literal unit token keeps this identity API non-secret (see rules.mjs). */
+function selfExempt(name, node) {
+  const token = node && Array.isArray(node.arguments) ? stringValue(node.arguments[0]) : null;
+  if (token === null) return false;
+  if (AURA_STATE_IDENTITY_APIS.has(name)) return SELF_EXEMPT_TOKENS.has(token);
+  return token === 'player';
+}
+
+/** String-keyed fields of a table constructor, mapped to their key nodes. */
+function constructorFields(tableNode) {
+  const fields = new Map();
+  for (const f of tableNode.fields) {
+    if (f.type === 'TableKeyString') fields.set(f.key.name, f.key);
+    else if (f.type === 'TableKey') {
+      const k = stringValue(f.key);
+      if (k !== null) fields.set(k, f.key);
+    }
+  }
+  return fields;
+}
+
 /**
  * Analyse one Lua source file.
  * @returns {{ findings: object[], parseError: object|null }}
@@ -981,6 +1198,7 @@ export function analyzeSource(source, filePath, api, options = {}) {
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
     strict: options.strict === true,
+    patch: options.patch ?? DEFAULT_PATCH,
   };
   const parseOptions = { locations: true, ranges: false, comments: false, scope: false };
   let ast;

@@ -1,0 +1,2 @@
+test/fixtures/patch/input.lua:4:13  warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+0 errors, 1 warning
