@@ -65,6 +65,16 @@ const VIOLATING = {
   'wsl014-violating.lua': ['WSL014@2', 'WSL014@3', 'WSL014@6', 'WSL014@7', 'WSL014@8'],
   'wsl015-violating.lua': ['WSL015@2', 'WSL015@3'],
   'wsl016-violating.lua': ['WSL016@6', 'WSL016@14'],
+  'wsl018-violating.lua': [
+    'WSL018@2', // GetAuraSlots
+    'WSL018@3', // GetAuraDataByIndex
+    'WSL018@4', // GetAuraDataBySlot
+    'WSL018@5', // GetAuraDataByAuraInstanceID
+    'WSL018@6', // GetBuffDataByIndex
+    'WSL018@7', // GetDebuffDataByIndex
+    'WSL018@8', // C_TooltipInfo.GetUnitBuff
+    'WSL018@11', // guarding the result does not save the call
+  ],
   'wsl017-violating.lua': [
     'WSL017@3', // container RegisterEvent
     'WSL017@4', // container RegisterUnitEvent
@@ -113,12 +123,6 @@ describe('12.1 taint behaviour', () => {
     for (const call of [
       'C_UnitAuras.GetUnitAuras("player")',
       'C_UnitAuras.GetUnitAuraInstanceIDs("player")',
-      'C_UnitAuras.GetAuraSlots("player", "HELPFUL")',
-      'C_UnitAuras.GetAuraDataByIndex("player", 1)',
-      'C_UnitAuras.GetAuraDataBySlot("player", 1)',
-      'C_UnitAuras.GetAuraDataByAuraInstanceID("player", 7)',
-      'C_UnitAuras.GetBuffDataByIndex("player", 1)',
-      'C_UnitAuras.GetDebuffDataByIndex("player", 1)',
       'C_UnitAuras.GetAuraDataBySpellName("player", "Rejuvenation")',
       'C_UnitAuras.GetUnitAuraBySpellID("player", 774)',
       'C_UnitAuras.GetPlayerAuraBySpellID(774)',
@@ -126,6 +130,40 @@ describe('12.1 taint behaviour', () => {
     ]) {
       expect(ids(`local a = ${call}\nlocal n = #a\n`)).toEqual(['WSL012@2']);
     }
+  });
+
+  it('WSL018 flags the by-index/slot/instance calls themselves, on top of the misuse', () => {
+    for (const call of [
+      'C_UnitAuras.GetAuraSlots("player", "HELPFUL")',
+      'C_UnitAuras.GetAuraDataByIndex("player", 1)',
+      'C_UnitAuras.GetAuraDataBySlot("player", 1)',
+      'C_UnitAuras.GetAuraDataByAuraInstanceID("player", 7)',
+      'C_UnitAuras.GetBuffDataByIndex("player", 1)',
+      'C_UnitAuras.GetDebuffDataByIndex("player", 1)',
+    ]) {
+      expect(ids(`local a = ${call}\nlocal n = #a\n`)).toEqual(['WSL018@1', 'WSL012@2']);
+    }
+  });
+
+  it('flags the C_TooltipInfo aura calls but does not claim their return is a secret vector', () => {
+    // The notes say these calls error; they say nothing about the shape of the return.
+    for (const call of [
+      'C_TooltipInfo.GetUnitAura("player", 1)',
+      'C_TooltipInfo.GetUnitBuff("player", 1)',
+      'C_TooltipInfo.GetUnitDebuff("player", 1)',
+      'C_TooltipInfo.GetUnitBuffByAuraInstanceID("player", 7)',
+      'C_TooltipInfo.GetUnitDebuffByAuraInstanceID("player", 7)',
+    ]) {
+      expect(ids(`local a = ${call}\nlocal n = #a\n`)).toEqual(['WSL018@1']);
+    }
+  });
+
+  it('WSL018 fires even where the result is correctly guarded, because the call errors first', () => {
+    const src =
+      'local aura = C_UnitAuras.GetAuraDataByIndex("player", 1)\n' +
+      'if not aura or issecretvalue(aura.name) then return end\n' +
+      'print(aura.icon)\n';
+    expect(ids(src)).toEqual(['WSL018@1']);
   });
 
   it('permits string.format and concatenation on aura values', () => {
@@ -190,8 +228,12 @@ describe('12.1 taint behaviour', () => {
   });
 
   it('does not flag member access on documented aura structures under 12.0 rules', () => {
-    // GetAuraDataByIndex returns AuraData; under 12.1 the whole return is a secret.
-    expect(ids('local a = C_UnitAuras.GetAuraDataByIndex("player", 1)\nprint(a.name)\n')).toEqual(['WSL012@2']);
+    // GetAuraDataByIndex returns AuraData; under 12.1 the whole return is a secret and
+    // the call itself errors, so both rules fire. Under 12.0 neither does.
+    expect(ids('local a = C_UnitAuras.GetAuraDataByIndex("player", 1)\nprint(a.name)\n')).toEqual([
+      'WSL018@1',
+      'WSL012@2',
+    ]);
     expect(ids('local a = C_UnitAuras.GetAuraDataByIndex("player", 1)\nprint(a.name)\n', { patch: '12.0' })).toEqual([]);
   });
 

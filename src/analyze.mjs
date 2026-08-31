@@ -21,6 +21,7 @@ import {
   booleanTestSeverity,
   DEFAULT_PATCH,
   AURA_SECRET_APIS,
+  AURA_ERRORING_CALLS,
   IDENTITY_SECRET_APIS,
   SELF_EXEMPT_TOKENS,
   AURA_STATE_IDENTITY_APIS,
@@ -820,6 +821,14 @@ class Analyzer {
         const removed = REMOVED_CALLS[name];
         if (removed) this.report(removed.ruleId, node, removed.message);
         if (name === 'CreateFrame') this.checkCreateFrameTemplates(args);
+        // The call errors outright, so this fires even where the result is guarded.
+        if (AURA_ERRORING_CALLS.has(name)) {
+          this.report(
+            'WSL018',
+            node,
+            `${name}() reaches aura data by index, slot or instance id, which Lua errors while auras are secret (combat, encounters, M+, PvP); ${AURA_SUGGESTION}`
+          );
+        }
       } else {
         const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
         const widgetType = recv ? this.widgetOf.get(recv) : null;
@@ -995,7 +1004,12 @@ class Analyzer {
         const frameType = stringValue(init.arguments[0]);
         if (frameType && ASPECT_FRAME_TYPES.has(frameType)) this.widgetOf.set(path, frameType);
       }
+      return;
     }
+    // `self.buttons[i] = button` inside initializeFrame: carry the widget type to the
+    // field so operations on it later are still checked.
+    const from = this.pathOf(init);
+    if (from && this.widgetOf.has(from)) this.widgetOf.set(path, this.widgetOf.get(from));
   }
 
   crossBoundary(local, name, args, argTaints, node, scope) {
@@ -1199,6 +1213,39 @@ function constructorFields(tableNode) {
     }
   }
   return fields;
+}
+
+const INHERITS_ATTR = /\binherits\s*=\s*(["'])([^"']+)\1/gi;
+
+/**
+ * Check .xml markup for templates 12.1 removed. Frames inherit templates in XML, so a
+ * Lua-only scan misses every addon that builds its aura header the declarative way.
+ * @returns {object[]} findings
+ */
+export function analyzeXml(source, filePath, options = {}) {
+  const disable = options.disable instanceof Set ? options.disable : new Set(options.disable ?? []);
+  if ((options.patch ?? DEFAULT_PATCH) === '12.0') return [];
+  if (disable.has('WSL014')) return [];
+
+  const findings = [];
+  INHERITS_ATTR.lastIndex = 0;
+  let m;
+  while ((m = INHERITS_ATTR.exec(source)) !== null) {
+    if (!m[2].split(',').some((t) => t.trim() === REMOVED_TEMPLATE)) continue;
+    const before = source.slice(0, m.index);
+    const line = before.split('\n').length;
+    findings.push({
+      file: filePath,
+      line,
+      column: m.index - before.lastIndexOf('\n'),
+      severity: RULES.WSL014.severity,
+      ruleId: 'WSL014',
+      message: REMOVED_TEMPLATE_MESSAGE,
+      api: null,
+      conditions: null,
+    });
+  }
+  return findings;
 }
 
 /**

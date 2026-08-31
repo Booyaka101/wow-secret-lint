@@ -1,6 +1,6 @@
 {
   "name": "wow-secret-lint",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Maps where a WoW retail addon touches Blizzard's secret-value API, and gates CI on the one error that is certain.",
   "type": "module",
   "license": "MIT",

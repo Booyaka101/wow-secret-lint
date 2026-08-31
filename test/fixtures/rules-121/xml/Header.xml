@@ -1,0 +1,8 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+	<Frame name="MyAuraHeader" inherits="SecureAuraHeaderTemplate" virtual="true">
+		<Size x="200" y="40"/>
+	</Frame>
+	<Button name="MyPlainButton" inherits="UIPanelButtonTemplate"/>
+	<Frame name="MyCombo" inherits="BackdropTemplate,SecureAuraHeaderTemplate"/>
+	<Script file="Header.lua"/>
+</Ui>

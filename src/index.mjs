@@ -2,18 +2,18 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, dirname } from 'node:path';
-import { analyzeSource } from './analyze.mjs';
+import { analyzeSource, analyzeXml } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
 import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
 import { DEFAULT_PATCH } from './rules.mjs';
 
 export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH } from './rules.mjs';
-export { analyzeSource } from './analyze.mjs';
+export { analyzeSource, analyzeXml } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 
-export const VERSION = '1.3.1';
+export const VERSION = '1.4.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -70,8 +70,11 @@ export async function lint(target, options = {}) {
   /** @type {{relative: string, absolute: string}[]} */
   let files = [];
 
+  /** @type {{relative: string, absolute: string}[]} */
+  const xmlFiles = [];
+
   if (info.isFile() && abs.toLowerCase().endsWith('.toc')) {
-    files = await filesFromToc(abs, result, cwd);
+    files = await filesFromToc(abs, result, cwd, xmlFiles);
   } else if (info.isFile()) {
     if (!abs.toLowerCase().endsWith('.lua')) {
       throw new Error(`not a Lua or .toc file: ${target}`);
@@ -93,7 +96,7 @@ export async function lint(target, options = {}) {
     if (retail.length) {
       const seen = new Set();
       for (const toc of retail) {
-        for (const f of await filesFromToc(toc.path, result, cwd)) {
+        for (const f of await filesFromToc(toc.path, result, cwd, xmlFiles)) {
           if (seen.has(f.absolute)) continue;
           seen.add(f.absolute);
           files.push(f);
@@ -141,6 +144,16 @@ export async function lint(target, options = {}) {
     result.findings.push(...findings);
   }
 
+  for (const file of xmlFiles) {
+    let source;
+    try {
+      source = await readFile(file.absolute, 'utf8');
+    } catch {
+      continue; // a missing .xml is already reported by .toc resolution
+    }
+    result.findings.push(...analyzeXml(source.replace(/^﻿/, ''), file.relative, analyzeOptions));
+  }
+
   result.findings.sort(byLocation);
   return result;
 }
@@ -175,9 +188,14 @@ export async function lintPaths(paths, options = {}) {
   return merged;
 }
 
-async function filesFromToc(tocPath, result, cwd) {
+async function filesFromToc(tocPath, result, cwd, xmlFiles = []) {
   const toc = await parseToc(tocPath);
-  const { resolved, missing } = await resolveTocFiles(toc);
+  const { resolved, missing, xml } = await resolveTocFiles(toc);
+  const seenXml = new Set(xmlFiles.map((f) => f.absolute));
+  for (const absolute of xml || []) {
+    if (seenXml.has(absolute)) continue;
+    xmlFiles.push({ relative: toPosix(relative(cwd, absolute)) || absolute, absolute });
+  }
   const tocLabel = toPosix(relative(cwd, tocPath)) || tocPath;
   for (const m of missing) {
     result.warningsBeforeLint.push(`${tocLabel}: listed file not found on disk: ${m}`);

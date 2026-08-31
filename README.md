@@ -2,7 +2,7 @@
 
 Static analysis for World of Warcraft **retail** addons. It maps where your Lua touches Blizzard's secret-value API, and hard-fails your build on the things Blizzard documents as certain to break.
 
-Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seven unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. When tainted code does something disallowed, the wiki is blunt about the result:
+Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seventeen unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. When tainted code does something disallowed, the wiki is blunt about the result:
 
 > When an operation that is not allowed is performed, the result will be an **immediate** Lua error.
 
@@ -134,7 +134,7 @@ Outputs: `errors`, `warnings`.
 
 ## Rules
 
-Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014 and WSL017 fail a build by default; the rest are warnings.
+Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014, WSL017 and WSL018 fail a build by default; the rest are warnings.
 
 | Rule | Severity | What it catches |
 | --- | --- | --- |
@@ -155,6 +155,7 @@ Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` pr
 | WSL015 | warning | 12.1: deprecated `getglobal`/`setglobal` |
 | WSL016 | warning | 12.1: `showCountdownFrame` passed to a private-aura API |
 | WSL017 | error | 12.1: forbidden-aspect operation on an AuraButton or AuraContainer |
+| WSL018 | error | 12.1: call of an aura API reached by index, slot or instance id |
 
 WSL008 comes from the [12.0.0 API changes](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes): *"COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them."* Use `COMBAT_LOG_EVENT_INTERNAL_UNFILTERED` or the `C_CombatLog` namespace.
 
@@ -164,13 +165,23 @@ WSL011 is a warning on purpose. `tostring` is absent from the wiki's allowed lis
 
 **WSL012** taints `C_UnitAuras.GetUnitAuras`, `GetUnitAuraInstanceIDs`, `GetAuraSlots`, the by-index/slot/instance queries (`GetAuraDataByIndex`, `GetAuraDataBySlot`, `GetAuraDataByAuraInstanceID`, `GetBuffDataByIndex`, `GetDebuffDataByIndex`) and the by-spell lookups (`GetAuraDataBySpellName`, `GetUnitAuraBySpellID`, `GetPlayerAuraBySpellID`, `GetCooldownAuraBySpellID`), since the notes say all of the UnitAura APIs return full secrets or nil. The by-index family additionally Lua-errors at the call itself while auras are secret, so any downstream use of its result is broken either way. Boolean tests on aura returns are never flagged: the value is a table or nil, and nil-checking it is how the new contract is meant to be consumed. The guard idiom DBM and BigWigs actually ship, `if not aura or issecretvalue(aura.name) then return end`, is credited in full: indexing one field inside a guard call is the test itself, and a guard naming any field vouches for the whole aura. Auras Blizzard explicitly flags as non-secret still come back readable; static analysis cannot know which spell IDs those are, so an unguarded read of one is still reported.
 
-**WSL013** covers the seven unit APIs the 12.1 notes single out: `UnitClass`, `UnitClassBase`, `UnitRace`, `UnitSex`, `UnitSexBase`, plus `UnitIsCharmed`/`UnitIsPossessed` which follow aura secrecy. The findings come out of the same arithmetic, comparison and boolean-test checkers as WSL001/002/007; only the rule id and severity differ. A literal `"player"` token is exempt (a unit is never secret to itself), and the charm pair is exempt for `"player"`, `"pet"` and `"vehicle"`, which the 12.1 notes state outright. A variable token is not exempt, because it can name an arena opponent. The wider identity set from the notes (`UnitGroupRolesAssigned`, `UnitInRaid`, `UnitIsPVP` and friends) stays in the conditional tier for now: turn on `--conditional=warn` to see it.
+**WSL013** covers every unit API the 12.1 notes name: `UnitClass`, `UnitClassBase`, `UnitRace`, `UnitSex`, `UnitSexBase`, `UnitIsOwnerOrControllerOfUnit`, `UnitPhaseReason`, `UnitGroupRolesAssigned`, `UnitGroupRolesAssignedEnum`, `UnitIsRaidOfficer`, `UnitInRaid`, `UnitIsPVP`, `UnitIsGroupLeader`, `UnitIsGroupAssistant`, `UnitLeadsAnyGroup`, `UnitGetAvailableRoles`, plus `UnitIsCharmed`/`UnitIsPossessed` which follow aura secrecy rather than identity. Every one of them also carries `SecretWhenUnitIdentityRestricted` in Blizzard's generated docs, so the notes and the docs agree. The findings come out of the same arithmetic, comparison and boolean-test checkers as WSL001/002/007; only the rule id and severity differ.
 
-**WSL014** flags calls to `UIParentLoadAddOn` (renamed `LoadAddOnWithErrorHandling`), `CanAccessObject` (use `FrameScriptObject:CanBeAccessedInContext`), `C_UnitAuras.TriggerPrivateAuraShowDispelType` (removed; use the `showDispelIcon` anchor option) and any `CreateFrame` template list naming `SecureAuraHeaderTemplate` (removed from Mainline; migrate to an AuraContainer). Referencing `UIParentLoadAddOn` without calling it is not flagged, because `if UIParentLoadAddOn then` is how you feature-detect the old client.
+A literal `"player"` token is exempt, since a unit is never secret to itself, and the charm pair is additionally exempt for `"pet"` and `"vehicle"`, which the notes state outright. The token is resolved through a constant, so `local PLAYER = "player"` then `UnitClass(PLAYER)` is exempt too, and the exemption is dropped as soon as the variable is reassigned. A variable token is never exempt, because it can name an arena opponent.
+
+The seventeenth API in that list, `GetInspectSpecialization`, is not here: the global was removed in the same patch, so it is a WSL014 finding pointing at `C_SpecializationInfo.GetInspectSpecialization`.
+
+**WSL014** covers every symbol 12.1 removed or renamed: the two renames the notes spell out (`UIParentLoadAddOn` to `LoadAddOnWithErrorHandling`, `CanAccessObject` to `FrameScriptObject:CanBeAccessedInContext`), and all 19 entries of the Removed column of the patch's global function table. The count in that table header is what pins the list, so it is complete rather than a sample.
+
+A replacement is named only where the notes state the rename outright, or where a bare global moved into a namespace under the same name and the target is present in the generated docs: `CanSurrenderArena` to `C_PvP.CanSurrenderArena`, `GetInspectSpecialization` to `C_SpecializationInfo.GetInspectSpecialization`, `GetInventorySlotInfo` to `C_PaperDollInfo.GetInventorySlotInfo`, and the private-aura sound pair to `C_UnitAuras.AddAuraSound`/`RemoveAuraSound`. The rest say only that the symbol is gone. Inventing a replacement would be worse than admitting there is none, and a same-name match across unrelated namespaces is a coincidence rather than a migration.
+
+`SecureAuraHeaderTemplate` is caught both in a `CreateFrame` template list and in an XML `inherits` attribute, including comma-separated lists. Referencing `UIParentLoadAddOn` without calling it is not flagged, because `if UIParentLoadAddOn then` is how you feature-detect the old client.
 
 **WSL016** exists because this one fails silently: `showCountdownFrame` was renamed `showCooldownFrame` in the private-aura anchor structures, the old field is ignored, and the cooldown swipe just stops appearing with no error to trace. It is caught both inline and through a local args table. oUF's `privateauras.lua` ships this bug today, as do the copies vendored into KkthnxUI and SpartanUI.
 
-**WSL017** knows a local is an AuraContainer or AuraButton when it comes from `CreateFrame("AuraContainer", ...)`/`CreateFrame("AuraButton", ...)` or arrives as the `initializeFrame` callback parameter of `AddAuraGroup`/`AddAuraSlot`/`AddItemEnchantment`. On those it flags `SetScript`/`HookScript`, event registration, input calls (`EnableMouse`, `RegisterForClicks`, `Click`, ...) and focus queries (`IsMouseOver`, ...), naming the forbidden aspect each one trips. Construction itself is never flagged.
+**WSL018** is the one that catches code WSL012 cannot. The notes say the by-index, by-slot and by-instance-id aura APIs *"will Lua error when called by addons while auras are secret"*, so the call is the failure, not what you do with the result. It therefore fires even where the result is guarded perfectly. BigWigs is the worked example: it has zero WSL012 findings because it guards every aura it reads, and four WSL018 findings because it still reaches those auras through `GetAuraDataByIndex`. Guarding the result cannot save a call that already threw. The `C_TooltipInfo` aura calls are included, but their returns are not treated as secret vectors, because the notes make no claim about their shape.
+
+**WSL017** knows a local is an AuraContainer or AuraButton when it comes from `CreateFrame("AuraContainer", ...)`/`CreateFrame("AuraButton", ...)` or arrives as the `initializeFrame` callback parameter of `AddAuraGroup`/`AddAuraSlot`/`AddItemEnchantment`, and it follows the value into a table field, so `self.buttons[i] = button` keeps the type. On those it flags `SetScript`/`HookScript`, event registration, input calls (`EnableMouse`, `RegisterForClicks`, `Click`, ...) and focus queries (`IsMouseOver`, ...), naming the forbidden aspect each one trips. Construction itself is never flagged.
 
 ### What it will never flag
 
@@ -236,14 +247,23 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 
 | Mode | Errors | Warnings | Addons that would fail CI |
 | --- | --- | --- | --- |
-| `--patch=12.1` (default) | 272 | 117 | 8 of 12 |
-| `--patch=12.1 --strict` | 382 | 7 | 8 of 12 |
+| `--patch=12.1` (default) | 379 | 121 | 9 of 12 |
+| `--patch=12.1 --strict` | 489 | 11 | 9 of 12 |
 | `--patch=12.0` | 20 | 90 | 3 of 12 |
 | `--patch=12.0 --strict` | 110 | 0 | 5 of 12 |
 
-The two `12.0` rows are identical to what v1.2.0 reported, which is the point of the flag. The jump to 272 is the 12.1 aura and identity surface landing: 148 WSL012 and 103 WSL013 findings, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage: Details' aura scanning (80 WSL012, 15 WSL013), SpartanUI's aura designer and corner indicators (56), oUF's classpower element and the copy of it inside KkthnxUI (5 each), DBM's class-keyed tables (50 WSL013), BigWigs (20 WSL013). WSL016 catches the silently dead `showCountdownFrame` in oUF `privateauras.lua:133` and both copies of it vendored into KkthnxUI and SpartanUI; WSL014 catches SpartanUI calling the renamed `UIParentLoadAddOn`. No addon in the corpus uses AuraContainers yet, so WSL017 measures 0 there and is exercised by fixtures.
+The two `12.0` rows are identical to what v1.2.0 reported, which is the point of the flag. Everything above them is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
 
-The number worth noticing is the one that is zero: **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard, and the analysis credits that idiom (see below). The linter separates code that has done the 12.1 work from code that has not.
+| Rule | Count | Where |
+| --- | --- | --- |
+| WSL012 | 148 | Details' aura scanning (80), SpartanUI (56), oUF classpower and its copy in KkthnxUI (5 each) |
+| WSL013 | 169 | DBM's class-keyed tables, BigWigs, and role checks across most of the corpus |
+| WSL018 | 36 | SpartanUI (18), Details (13), BigWigs (4), KkthnxUI (1) |
+| WSL014 | 10 | mostly `GetInventorySlotInfo`, plus `GetInspectSpecialization`, `GetWeaponEnchantInfo` and SpartanUI's `UIParentLoadAddOn` |
+| WSL016 | 3 | oUF `privateauras.lua:133` and both copies vendored into KkthnxUI and SpartanUI |
+| WSL017 | 0 | no addon in the corpus uses AuraContainers yet; exercised by fixtures |
+
+Two numbers are worth reading together. **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard and the analysis credits that idiom. **BigWigs still has four WSL018 findings**, because guarding the result does not help when the call itself is what errors. That pair is the honest summary of where the ecosystem is: the careful addons did the guard work, and the guard work is not enough.
 
 A sample of the WSL012/WSL013 findings across every affected repo was read against its source by hand; each one performs an operation the 12.1 notes document as disallowed, on a value those notes document as secret, with no guard in scope. The pre-12.1 findings are unchanged from v1.2.0, where all 110 strict findings were read by hand.
 
@@ -309,7 +329,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 - **No cross-file interprocedural analysis in v1.** Taint follows plain assignment, table field stores, the return value of a file-local function, and one level of intra-file call-argument passing. A secret that leaves through a global and comes back in another file is not tracked.
 - **No LuaJIT or Lua 5.4 syntax.** Files are parsed as Lua 5.1. WoW accepts a semicolon after `break`, which stock 5.1 does not, so a file that fails on 5.1 gets one retry under the 5.2 grammar before it is reported as a parse error.
 - **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 is the one exception, and its typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback. A button stored in a table field or passed across files is not tracked.
-- **XML is followed for `<Script>`/`<Include>`, not linted.** A `SecureAuraHeaderTemplate` referenced from an XML `inherits` attribute is invisible to WSL014; only Lua-side `CreateFrame` template strings are checked.
+- **XML is followed for `<Script>`/`<Include>` and checked only for removed templates.** WSL014 reads `inherits` attributes in every `.xml` the `.toc` pulls in, so a declarative aura header is caught. Nothing else in the markup is analysed: widget scripts written inline in XML are not parsed as Lua.
 - **`string.format` output is not tracked as secret.** The wiki names it as the sanctioned way to render a secret, and following it would flood every `SetText` call site. The trade is a known blind spot on `#string.format(...)`.
 - A `.toc` listing a file that is not on disk warns and keeps going. A file that will not parse is reported and the run exits 2.
 
@@ -319,7 +339,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-175 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 rule (`test/fixtures/rules-121/`), a fixture proving `--patch=12.0` reproduces the v1.2.0 output byte for byte (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
+181 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 rule (`test/fixtures/rules-121/`), a fixture proving `--patch=12.0` reproduces the v1.2.0 output byte for byte (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |
