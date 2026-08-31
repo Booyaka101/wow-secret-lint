@@ -1,6 +1,16 @@
 # PROGRESS
 
-**Status: 1.3.0 (the Patch 12.1 upgrade) built, tested and pushed as a PR. Publishing to npm and cutting the release are owner steps, as always.**
+**Status: 1.3.0 fully shipped. PR merged, CI green on the merge commit, tagged, published to npm, released, and the Marketplace listing picked up the new version by itself.**
+
+| Thing | State |
+| --- | --- |
+| PR | [#2](https://github.com/Booyaka101/wow-secret-lint/pull/2) merged as `4119262` |
+| CI on `4119262` | all 5 checks green (ubuntu/windows x node 20/22, plus the Action on itself) |
+| Tags | `v1.3.0` and `v1` both at `4119262` |
+| npm | `wow-secret-lint@1.3.0`, `latest`, verified by installing from the public registry into a clean directory and running the worked example |
+| Release | https://github.com/Booyaka101/wow-secret-lint/releases/tag/v1.3.0, not a draft |
+| Marketplace | live, now showing v1.3.0; no second factor needed, later releases do pick themselves up as expected |
+| Action `patch` input | present in `action.yml` at the `v1` tag |
 
 Last updated 2026-08-31. Earlier history (1.0.0 through 1.2.0, the Marketplace saga, the severity recast) is below the 1.3.0 section, unchanged.
 
@@ -54,8 +64,13 @@ So there is exactly one snapshot, unchanged, and `--patch` gates the rule surfac
 
 ### Left for the owner
 
-- Merge the PR, then the usual release steps: tag `v1.3.0`, move `v1`, `npm publish` (2FA), release notes. The release description should mention where the clone check stopped: WSL016 and WSL017 have small standalone bodies because they parallel nothing that exists.
-- The two issue comments from 1.0.0 are still held (owner owns final wording). A third candidate now exists: oUF ships the `showCountdownFrame` bug at `elements/privateauras.lua:133` and two big addons vendor it; a report there fixes three addons at once and the finding is concrete.
+Only the outward-facing posts, held on the house rule that the owner owns final wording. Drafts are written and the targets were re-checked on 2026-08-31:
+
+- **oUF, a new issue.** `elements/privateauras.lua:133` still passes `showCountdownFrame`, verified against upstream `master` today, not against the corpus tarball. 12.1 renamed it to `showCooldownFrame` and ignores the old name, so the cooldown swipe silently stops. No existing oUF issue mentions it (searched open and closed). KkthnxUI and SpartanUI vendor the same file, so one report fixes three addons. oUF is already tracking 12.1 in the open issue #873, so the repo is receptive.
+- **aura-questor#68**, still open with 0 comments, is the one surviving 1.0.0-era candidate.
+- **KkthnxUI#121 is now closed**, so that draft is dropped rather than posted late.
+
+`npm publish` needed no OTP; the stored session had publish rights, though `npm profile get` and `npm access list` both 403, so the credential is a restricted token. Provenance is still absent and still needs Trusted Publishing or an `NPM_TOKEN` workflow, both behind npm's 2FA.
 
 ### Candidates for 1.4.0, in order of value
 
