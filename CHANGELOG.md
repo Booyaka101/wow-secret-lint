@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.1 - 2026-08-31
+
+### Changed
+
+- **WSL016 now points at the migration, not just the rename.** Reporting the
+  `showCountdownFrame` bug to oUF ([#888](https://github.com/oUF-wow/oUF/issues/888)) got
+  it closed as not planned, with the reason that private auras are unofficially deprecated
+  as of 12.1 and the element is slated for removal. The bug was not disputed. Verified the
+  substance of the reply against Blizzard's live source: `Blizzard_AuraContainerSources.lua`
+  carries `AuraContainerPrivateAuraSource` and reaches private auras through
+  `C_UnitAurasPrivate.GetAllPrivateAuraInstanceIDs`, so an AuraContainer displays them with
+  no private aura anchor at all. The message and the README now say to migrate rather than
+  rename, and the rule stays a warning because of it.
+
 ## 1.4.0 - 2026-08-31
 
 Closes every item that was sitting in PROGRESS as a next step. Nothing in the 12.1 notes

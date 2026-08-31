@@ -30,7 +30,19 @@ wired. It needs either Trusted Publishing configured on npmjs.com or an `NPM_TOK
 secret, both behind npm's 2FA, so it stays owner-operated. The work that was mine is done;
 what remains is one npm settings page and one click.
 
-**oUF#888** is open with no reply yet. Nothing to do but wait.
+**oUF#888 was closed as not planned**, and it was still worth filing. p3lim did not dispute
+the bug. He said private auras are unofficially deprecated as of 12.1, no new ones are
+being added, the oUF element is slated for removal, and existing private auras surface
+through aura containers anyway. BigWigs and NSRT have already moved.
+
+Checked the substance rather than taking it: `Blizzard_AuraContainerSources.lua` on the
+live branch carries `AuraContainerPrivateAuraSource` and reaches private auras via
+`C_UnitAurasPrivate.GetAllPrivateAuraInstanceIDs`, so a container really does show them
+with no anchor. WSL016 now advises migrating rather than renaming, which is better advice
+than the tool had before the issue was filed.
+
+The lesson is that a declined report is not a wasted one. The outcome was a correction to
+what the tool tells people, sourced from the maintainer of the library most affected.
 
 ### Genuinely open, and why none of it is actionable from here
 
