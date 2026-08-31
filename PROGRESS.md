@@ -1,5 +1,25 @@
 # PROGRESS
 
+## 1.3.1, and two posts deliberately not made
+
+**Status: 1.3.1 shipped. npm `latest`, release live, `v1` moved, 175 tests, CI green on the merge commit.**
+
+Filed [oUF#888](https://github.com/oUF-wow/oUF/issues/888) for the `showCountdownFrame` bug. Verifying it before posting changed it twice, and both corrections mattered:
+
+- The draft claimed KkthnxUI and SpartanUI both carry the bug. **KkthnxUI had already fixed it** in `8522b82` on 2026-08-28, three days earlier. Checking the live repo instead of the corpus tarball caught it. The sentence became corroboration (an independent maintainer made this exact rename) instead of a false accusation.
+- The draft said the stale key is silently ignored. That cannot be verified without running the game, so it was cut. What replaced it is documented: `showCooldownFrame` carries `Default = false`, so an unset field means no spiral either way.
+- Two of the verification steps were themselves untrustworthy and were discarded rather than leaned on: GitHub code search returned 0 for a string sitting in the raw file, and the first docs URL 404'd into an empty file that would have grepped as "field absent". The final evidence is all 612 generated doc files downloaded and grepped, plus Blizzard's own two callers.
+
+**Did not post to SpartanUI.** Their `libs/oUF` is not a submodule, but their copy of `privateauras.lua` is byte-identical to oUF master and their history shows wholesale engine syncs (`Update the unit frame engine to oUF 14.0.0`, 2026-08-11). Asking them to diverge from upstream for a bug upstream is already tracking is noise. It arrives with their next sync.
+
+**Did not comment on aura-questor#68.** Ran the tool over the real addon first: 114 files, and it does not diagnose that crash at all. The trace is taint spread, every frame is a Blizzard file, and the arithmetic is in Blizzard's widget code. A comment there would have been promotion wearing a diagnosis. That limit is now written into the README.
+
+**What the run did find** was a false positive in 1.3.0 itself, the only finding in aura-questor and it was wrong: `local PLAYER = "player"` then `UnitClass(PLAYER)`. The `"player"` exemption resolved literal arguments only. Fixed in 1.3.1, corpus WSL013 104 to 103, 12.0 output unchanged. By this repo's own standard a rule that fires on correct code is worse than one that misses, so it went out as its own patch release rather than waiting.
+
+The general lesson, and it is the same one as the 1.0.0 severity recast: running the tool against real source is worth more than any amount of reasoning about it. Both the false positive and the killed comment came out of one 30 second run.
+
+---
+
 **Status: 1.3.0 fully shipped. PR merged, CI green on the merge commit, tagged, published to npm, released, and the Marketplace listing picked up the new version by itself.**
 
 | Thing | State |
