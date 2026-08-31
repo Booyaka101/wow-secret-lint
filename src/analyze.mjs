@@ -104,6 +104,7 @@ class Analyzer {
     this.patch121 = options.patch !== '12.0';
     this.widgetOf = new Map(); // dotted path -> 'AuraContainer' | 'AuraButton'
     this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
+    this.stringConst = new Map(); // dotted path -> its string value, for `local PLAYER = "player"`
     this.guardArgDepth = 0; // > 0 while evaluating the arguments of a guard or scrubber call
   }
 
@@ -236,7 +237,7 @@ class Analyzer {
       if (AURA_SECRET_APIS.has(name)) {
         return this.makeTaint({ kind: 'secret', origin: name, type: ret ? ret.type : null, category: 'aura' });
       }
-      if (IDENTITY_SECRET_APIS.has(name) && !selfExempt(name, node)) {
+      if (IDENTITY_SECRET_APIS.has(name) && !this.selfExempt(name, node)) {
         return this.makeTaint({ kind: 'secret', origin: name, type: ret ? ret.type : null, category: 'identity' });
       }
     }
@@ -891,6 +892,22 @@ class Analyzer {
 
   // ------------------------------------------------------------- patch 12.1 checks
 
+  /**
+   * True when the unit token keeps this identity API non-secret (see rules.mjs). Addons
+   * routinely hold the token in a constant (`local PLAYER = "player"`), so resolve an
+   * identifier back to its string value before deciding.
+   */
+  selfExempt(name, node) {
+    const arg = node && Array.isArray(node.arguments) ? node.arguments[0] : null;
+    let token = stringValue(arg);
+    if (token === null && arg && arg.type === 'Identifier') {
+      token = this.stringConst.has(arg.name) ? this.stringConst.get(arg.name) : null;
+    }
+    if (token === null) return false;
+    if (AURA_STATE_IDENTITY_APIS.has(name)) return SELF_EXEMPT_TOKENS.has(token);
+    return token === 'player';
+  }
+
   /** Tag initializeFrame callback parameters as AuraButtons; returns the names to untag. */
   tagInitializeFrameParams(callee, args) {
     if (!callee || !callee.method || !AURA_GROUP_METHODS.has(callee.name)) return [];
@@ -962,7 +979,12 @@ class Analyzer {
     }
     this.widgetOf.delete(path);
     this.tableFields.delete(path);
+    this.stringConst.delete(path);
     if (!init) return;
+    if (init.type === 'StringLiteral') {
+      this.stringConst.set(path, stringValue(init));
+      return;
+    }
     if (init.type === 'TableConstructorExpression') {
       this.tableFields.set(path, constructorFields(init));
       return;
@@ -1164,14 +1186,6 @@ function guardsParamIn(analyzer, fnNode, paramName) {
 function exits(body) {
   const last = body[body.length - 1];
   return !!last && (last.type === 'ReturnStatement' || last.type === 'BreakStatement');
-}
-
-/** True when a literal unit token keeps this identity API non-secret (see rules.mjs). */
-function selfExempt(name, node) {
-  const token = node && Array.isArray(node.arguments) ? stringValue(node.arguments[0]) : null;
-  if (token === null) return false;
-  if (AURA_STATE_IDENTITY_APIS.has(name)) return SELF_EXEMPT_TOKENS.has(token);
-  return token === 'player';
 }
 
 /** String-keyed fields of a table constructor, mapped to their key nodes. */

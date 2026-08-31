@@ -139,7 +139,7 @@ describe('cli', () => {
 
   it('prints the version', async () => {
     const r = await run(['--version']);
-    expect(r.stdout.trim()).toBe('1.3.0');
+    expect(r.stdout.trim()).toBe('1.3.1');
   });
 
   it('fails clearly on a path that does not exist', async () => {

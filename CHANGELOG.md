@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.1 - 2026-08-31
+
+### Fixed
+
+- **WSL013 false positive on a unit token held in a constant.** The self-exemption for
+  `"player"` only resolved a literal argument, so the common shape
+
+  ```lua
+  local PLAYER = "player"
+  local _, classFile = UnitClass(PLAYER)
+  local color = RAID_CLASS_COLORS[classFile]
+  ```
+
+  was reported even though the player is never secret to itself. A simple string local is
+  now resolved back to its value, and the constant is dropped as soon as the variable is
+  reassigned. Found by running 1.3.0 against [aura-questor](https://github.com/lucascodev/aura-questor),
+  which went from one finding to a clean run. In the 12-addon corpus WSL013 drops from 104
+  to 103 (the other one is Details). No other counts move, and `--patch=12.0` output is
+  unchanged.
+
 ## 1.3.0 - 2026-08-31
 
 Patch 12.1 ("Curse of Ula'tek", live 2026-08-11) widened the secret surface far beyond

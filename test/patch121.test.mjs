@@ -169,6 +169,26 @@ describe('12.1 taint behaviour', () => {
     expect(ids('if UnitIsCharmed(unit) then end\n')).toEqual(['WSL013@1']);
   });
 
+  it('resolves a unit token held in a constant, as real addons write it', () => {
+    // aura-questor Source/Game/ClassColor.lua does exactly this and was a false positive.
+    const src =
+      'local PLAYER = "player"\n' +
+      'local _, classFile = UnitClass(PLAYER)\n' +
+      'local color = RAID_CLASS_COLORS[classFile]\n';
+    expect(ids(src)).toEqual([]);
+    expect(ids('local U = "target"\nlocal _, c = UnitClass(U)\nlocal x = T[c]\n')).toEqual(['WSL013@3']);
+    expect(ids('local PET = "pet"\nif UnitIsCharmed(PET) then end\n')).toEqual([]);
+  });
+
+  it('drops the constant once the variable is reassigned', () => {
+    const src =
+      'local U = "player"\n' +
+      'U = "arena1"\n' +
+      'local _, c = UnitClass(U)\n' +
+      'local x = T[c]\n';
+    expect(ids(src)).toEqual(['WSL013@4']);
+  });
+
   it('does not flag member access on documented aura structures under 12.0 rules', () => {
     // GetAuraDataByIndex returns AuraData; under 12.1 the whole return is a secret.
     expect(ids('local a = C_UnitAuras.GetAuraDataByIndex("player", 1)\nprint(a.name)\n')).toEqual(['WSL012@2']);
