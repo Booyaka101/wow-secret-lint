@@ -970,7 +970,7 @@ class Analyzer {
           this.report(
             'WSL016',
             keyNode,
-            `${oldField} was removed from ${docArgs[i].type} in 12.1 and is silently ignored (the cooldown swipe never shows); use ${newField} instead`
+            `${oldField} was removed from ${docArgs[i].type} in 12.1 and is silently ignored (the cooldown swipe never shows); rename it to ${newField}, or move to an AuraContainer, which sources private auras too`
           );
         }
       }

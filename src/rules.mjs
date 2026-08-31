@@ -92,7 +92,7 @@ export const RULES = {
     severity: 'warning',
     patch: '12.1',
     summary: 'showCountdownFrame passed to a private-aura API',
-    source: `${PATCH121} : showCountdownFrame was removed from AddPrivateAuraAnchorArgs and UnitPrivateAuraAnchorInfo, replaced by showCooldownFrame, showCooldownEdge and showDispelIcon. The field is silently ignored, so the cooldown swipe stops appearing with no Lua error.`,
+    source: `${PATCH121} : showCountdownFrame was removed from AddPrivateAuraAnchorArgs and UnitPrivateAuraAnchorInfo, replaced by showCooldownFrame, showCooldownEdge and showDispelIcon. The field is silently ignored, so the cooldown swipe stops appearing with no Lua error. Note that AuraContainers now source private auras (AuraContainerPrivateAuraSource), which is the migration rather than the rename.`,
   },
   WSL017: {
     severity: 'error',
