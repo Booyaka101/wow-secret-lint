@@ -4,3 +4,6 @@ node_modules/
 .DS_Store
 coverage/
 .vitest/
+
+# Local build notes, not for the public repo
+PROGRESS.md
