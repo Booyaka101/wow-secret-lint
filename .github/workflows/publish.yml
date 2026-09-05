@@ -1,17 +1,13 @@
 name: Publish to npm with provenance
 
-# Manual only. Publishing from CI is what makes a provenance attestation possible, but it
-# needs one of the two setups below to exist first, and both live behind npm's own 2FA.
-# Until then this workflow is inert and releases are published from a local session.
+# Manual only. Auth is npm Trusted Publishing (OIDC): the package on npmjs.com
+# names Booyaka101/wow-secret-lint + publish.yml as its trusted publisher, so
+# the id-token: write permission below is the whole credential. There is no
+# token to rotate, and provenance is attached automatically.
 #
-#   Trusted Publishing (preferred, no token to rotate):
-#     npmjs.com -> wow-secret-lint -> Settings -> Trusted Publisher
-#     repository Booyaka101/wow-secret-lint, workflow publish.yml
-#     then delete the NODE_AUTH_TOKEN line below
-#
-#   Classic automation token:
-#     npmjs.com -> Access Tokens -> Generate -> Automation
-#     add it here as the NPM_TOKEN repository secret
+# Trusted publishing needs npm >= 11.5.1, newer than the npm bundled with Node
+# 22, hence the explicit upgrade step. Without it the publish fails with an
+# auth error that reads like a bad token.
 #
 # Run it after the release tag exists and CI is green on that commit.
 
@@ -37,6 +33,12 @@ jobs:
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
+      - name: Meet the trusted-publishing version floor
+        run: |
+          set -euo pipefail
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
       - run: npm ci
       - run: npm test
       - name: Refuse to publish a version that is already on the registry
@@ -47,6 +49,7 @@ jobs:
             exit 1
           fi
           echo "publishing $v"
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Auth is npm Trusted Publishing (OIDC): the package names this repo and
+      # this workflow filename on npmjs.com, so id-token: write above is the
+      # whole credential and provenance is attached automatically.
+      - run: npm publish --access public
