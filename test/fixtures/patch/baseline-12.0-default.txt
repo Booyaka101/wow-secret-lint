@@ -1,0 +1,26 @@
+# exit 1
+test/fixtures/worked-example: no .toc found, scanning every .lua instead; flavour cannot be determined
+test/fixtures/patch/input.lua:4:13                                                           warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/regressions/aura-questor-68-textheight-arithmetic/input.lua:11:18              warning  WSL001  arithmetic on a secret value: 'textHeight' derives from UnitGetTotalHealAbsorbs() (SecretReturns=true)
+test/fixtures/regressions/betterfriendlist-133-missing-hassecretvalues-gate/input.lua:23:30  warning  WSL009  secret value crosses into CacheGuildMOTDFromChatFrame() with no guard on parameter 'motdText': 'speaker' derives from UnitSpellTargetName() (SecretReturns=true)
+test/fixtures/regressions/combat-log-event-registration/input.lua:4:21                       error    WSL008  COMBAT_LOG_EVENT_UNFILTERED errors when registered in 12.0; use COMBAT_LOG_EVENT_INTERNAL_UNFILTERED or the C_CombatLog namespace instead
+test/fixtures/regressions/combat-log-event-registration/input.lua:5:21                       error    WSL008  COMBAT_LOG_EVENT errors when registered in 12.0; use COMBAT_LOG_EVENT_INTERNAL_UNFILTERED or the C_CombatLog namespace instead
+test/fixtures/regressions/kkthnxui-118-secret-table-key/input.lua:9:27                       warning  WSL005  secret value used as a table key: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/regressions/kkthnxui-118-secret-table-key/input.lua:10:13                      warning  WSL005  secret value used as a table key: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/regressions/kkthnxui-119-map-icon-arithmetic/input.lua:9:17                    warning  WSL001  arithmetic on a secret value: 'self.cache.textHeight' derives from UnitHealthMissing() (SecretReturns=true)
+test/fixtures/regressions/kkthnxui-121-textheight-arithmetic/input.lua:10:29                 warning  WSL001  arithmetic on a secret value: 'textHeight' derives from UnitHealthPercent() (SecretReturns=true)
+test/fixtures/regressions/kkthnxui-121-textheight-arithmetic/input.lua:11:24                 warning  WSL001  arithmetic on a secret value: 'textHeight' derives from UnitHealthPercent() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:9:14                                                      warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:10:14                                                     warning  WSL002  comparison of a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:11:2                                                      warning  WSL003  call of a secret value as-if it were a function: 'casting' derives from UnitCastingDuration() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:12:15                                                     warning  WSL004  length operator (#) on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:13:16                                                     warning  WSL005  indexed access on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:14:37                                                     warning  WSL006  secret value passed to C_CVar.SetCVar(), which is documented SecretArguments = "NotAllowed": 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:15:5                                                      warning  WSL007  boolean test on a secret value (its documented return type is bool): 'inRange' derives from UnitInRange() (SecretReturns=true)
+test/fixtures/rules/every-rule.lua:18:22                                                     error    WSL008  COMBAT_LOG_EVENT errors when registered in 12.0; use COMBAT_LOG_EVENT_INTERNAL_UNFILTERED or the C_CombatLog namespace instead
+test/fixtures/rules/every-rule.lua:19:21                                                     warning  WSL011  tostring() on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/hooksecurefunc.lua:4:20                                                  warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/rules/hooksecurefunc.lua:11:5                                                  warning  WSL002  comparison of a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/worked-example/Core/UnitFrame.lua:3:13                                         warning  WSL001  arithmetic on a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+test/fixtures/worked-example/Core/UnitFrame.lua:4:4                                          warning  WSL002  comparison of a secret value: 'hp' derives from UnitHealth() (SecretReturns=true)
+3 errors, 20 warnings

@@ -6,8 +6,8 @@
 import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
-import { refreshSnapshot, writeSnapshot, SNAPSHOT_PATH } from '../src/apidata.mjs';
-import { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH } from '../src/rules.mjs';
+import { refreshSnapshot, writeSnapshot, loadSnapshot, SNAPSHOT_PATH, DEFAULT_REF } from '../src/apidata.mjs';
+import { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchList, patchAtLeast } from '../src/rules.mjs';
 
 const USAGE = `wow-secret-lint ${VERSION}
 Static analysis for World of Warcraft retail addons: finds Secret Value violations
@@ -21,9 +21,10 @@ Usage:
 Options:
   --format=<stylish|json|github>  output format (default: stylish)
   --game=<retail|classic>         classic has no secret values and exits 0 immediately
-  --patch=<12.0|12.1>             which patch surface the built-in rules check
-                                  (default: 12.1). 12.0 pins the pre-12.1 rule set for
-                                  addons still targeting the older client
+  --patch=<12.0|12.1|12.1.5|auto> which patch surface the built-in rules check
+                                  (default: 12.1.5). An older value pins the rule set for
+                                  addons still targeting an older client, byte for byte;
+                                  auto reads the addon's own .toc Interface number
   --strict                        raise SecretReturns findings from warning to error.
                                   Off by default: see "the open question on severity"
                                   in the README before you gate CI on them.
@@ -38,6 +39,10 @@ Options:
   --snapshot=<path>               use a different API snapshot
   --refresh                       rebuild the vendored API snapshot from the public mirror
                                   (the only command that uses the network)
+  --refresh-ref=<ref>             branch or tag of the mirror to rebuild from
+                                  (default: ${DEFAULT_REF})
+  --force                         let --refresh write a snapshot of an older client build
+                                  than the one already vendored
   --rules                         print the rule table and exit
   --version                       print the version and exit
   -h, --help                      print this help and exit
@@ -64,6 +69,8 @@ function parseArgs(argv) {
     maxWarnings: Infinity,
     snapshot: undefined,
     refresh: false,
+    refreshRef: DEFAULT_REF,
+    force: false,
     rules: false,
     help: false,
     version: false,
@@ -78,6 +85,7 @@ function parseArgs(argv) {
     if (arg === '-h' || arg === '--help') opts.help = true;
     else if (arg === '--version' || arg === '-v') opts.version = true;
     else if (arg === '--refresh') opts.refresh = true;
+    else if (arg === '--force') opts.force = true;
     else if (arg === '--rules') opts.rules = true;
     else if (arg === '--strict') opts.strict = true;
     else if (arg.startsWith('--format')) opts.format = value(arg, argv, () => i++);
@@ -88,6 +96,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--access-guard')) opts.accessGuards.push(...value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean));
     else if (arg.startsWith('--disable')) opts.disable = value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean);
     else if (arg.startsWith('--max-warnings')) opts.maxWarnings = Number(value(arg, argv, () => i++));
+    else if (arg.startsWith('--refresh-ref')) opts.refreshRef = value(arg, argv, () => i++);
     else if (arg.startsWith('--snapshot')) opts.snapshot = value(arg, argv, () => i++);
     else if (arg.startsWith('-')) throw new Error(`unknown option "${arg}"`);
     else opts.paths.push(arg);
@@ -129,11 +138,12 @@ async function main() {
   }
 
   if (opts.refresh) {
-    process.stderr.write('rebuilding API snapshot from Gethe/wow-ui-source@live ...\n');
+    process.stderr.write(`rebuilding API snapshot from Gethe/wow-ui-source@${opts.refreshRef} ...\n`);
     let index;
     try {
       let last = 0;
       index = await refreshSnapshot({
+        ref: opts.refreshRef,
         onProgress: ({ done, total }) => {
           if (done - last >= 50 || done === total) {
             last = done;
@@ -144,9 +154,22 @@ async function main() {
     } catch (err) {
       fail(`--refresh failed: ${err.message}`);
     }
-    const path = await writeSnapshot(index, opts.snapshot ?? SNAPSHOT_PATH);
+    const path = opts.snapshot ?? SNAPSHOT_PATH;
+    const vendored = await loadSnapshot(path).catch(() => null);
+    // The mirror tags a new patch before it moves the live branch, so a scheduled refresh
+    // can otherwise walk the snapshot back onto a client build that is no longer current.
+    if (!opts.force && vendored && vendored.build && index.build && index.build < vendored.build) {
+      process.stderr.write(
+        `wow-secret-lint: @${opts.refreshRef} is still ${index.patch ?? '?'} (build ${index.build}), older than ` +
+          `the vendored ${vendored.patch ?? '?'} (build ${vendored.build}); left the snapshot alone. ` +
+          `Pass --force to write it anyway.\n`
+      );
+      return 0;
+    }
+    await writeSnapshot(index, path);
     process.stderr.write(
-      `wrote ${path}: ${index.functionCount} functions, ${index.secretReturnCount} with SecretReturns=true, ` +
+      `wrote ${path}: patch ${index.patch ?? 'unknown'} build ${index.build ?? 'unknown'}, ` +
+        `${index.functionCount} functions, ${index.secretReturnCount} with SecretReturns=true, ` +
         `${index.conditionalCount} conditionally secret, ${index.structureCount} structures\n`
     );
     if (index.failures && index.failures.length) {
@@ -157,7 +180,9 @@ async function main() {
 
   if (!FORMATS.includes(opts.format)) fail(`unknown format "${opts.format}" (expected one of: ${FORMATS.join(', ')})`);
   if (!['retail', 'classic'].includes(opts.game)) fail(`unknown game "${opts.game}" (expected retail or classic)`);
-  if (!PATCHES.includes(opts.patch)) fail(`unknown --patch "${opts.patch}" (expected ${PATCHES.join(' or ')})`);
+  if (opts.patch !== 'auto' && !PATCHES.includes(opts.patch)) {
+    fail(`unknown --patch "${opts.patch}" (expected ${patchList()}, or auto)`);
+  }
   if (!['warn', 'error', 'off'].includes(opts.conditional)) {
     fail(`unknown --conditional "${opts.conditional}" (expected warn, error or off)`);
   }
@@ -175,6 +200,14 @@ async function main() {
     else if (opts.format === 'github') process.stdout.write('::notice::classic has no secret values; nothing to check\n');
     else process.stdout.write(`${JSON.stringify({ version: VERSION, game: 'classic', findings: [], parseErrors: [], summary: { errors: 0, warnings: 0, parseErrors: 0 } }, null, 2)}\n`);
     return 0;
+  }
+
+  const snapshot = await loadSnapshot(opts.snapshot).catch(() => null);
+  if (snapshot && snapshot.patch && opts.patch !== 'auto' && !patchAtLeast(snapshot.patch, opts.patch)) {
+    process.stderr.write(
+      `wow-secret-lint: the vendored snapshot is patch ${snapshot.patch} but --patch is ${opts.patch}; ` +
+        `the rules that read the snapshot are checking an older API surface. Run --refresh.\n`
+    );
   }
 
   let merged;

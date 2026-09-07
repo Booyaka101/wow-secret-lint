@@ -1,0 +1,6 @@
+## Interface: 120105
+## Title: Pandemic Glow
+## Notes: Worked example for the patch 12.1.5 rules.
+
+Core/Pandemic.lua
+Core/Cooldowns.lua

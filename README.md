@@ -2,7 +2,7 @@
 
 Static analysis for World of Warcraft **retail** addons. It maps where your Lua touches Blizzard's secret-value API, and hard-fails your build on the things Blizzard documents as certain to break.
 
-Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seventeen unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. When tainted code does something disallowed, the wiki is blunt about the result:
+Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seventeen unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. Patch 12.1.5 (build 69594, live 2026-09-03) [added two more forbidden aspects and closed the cooldown APIs](https://warcraft.wiki.gg/wiki/Patch_12.1.5/API_changes). When tainted code does something disallowed, the wiki is blunt about the result:
 
 > When an operation that is not allowed is performed, the result will be an **immediate** Lua error.
 
@@ -17,7 +17,7 @@ That one is [KkthnxUI#121](https://github.com/Kkthnx-Wow/KkthnxUI/issues/121), f
 
 `wow-secret-lint` reads Blizzard's own generated API documentation, tracks which of your locals hold a secret, and tells you where you touch one.
 
-**It reports, it does not accuse.** The rules that fail your build by default are the ones Blizzard states outright: `WSL008` (combat log registration errors), and the 12.1 rules `WSL012`/`WSL013` (aura and identity APIs "will now either return full secrets or nil when called by addons"), `WSL014` (the symbol no longer exists) and `WSL017` (forbidden aspects). The 12.0-era `SecretReturns` tier stays a warning, because whether those APIs really hand a secret to tainted code on every call is not something static analysis can confirm; run `--strict` to gate on it. [The reasoning is spelled out below](#the-open-question-on-severity) and it is worth two minutes before you wire this into CI.
+**It reports, it does not accuse.** The rules that fail your build by default are the ones Blizzard states outright: `WSL008` (combat log registration errors), the 12.1 rules `WSL012`/`WSL013` (aura and identity APIs "will now either return full secrets or nil when called by addons"), `WSL014` (the symbol no longer exists) and `WSL017` (forbidden aspects), and the 12.1.5 rules `WSL019`/`WSL020` (the two new forbidden aspects) and `WSL021` (protected cooldown frames). The 12.0-era `SecretReturns` tier stays a warning, because whether those APIs really hand a secret to tainted code on every call is not something static analysis can confirm; run `--strict` to gate on it. [The reasoning is spelled out below](#the-open-question-on-severity) and it is worth two minutes before you wire this into CI.
 
 ## Install
 
@@ -93,6 +93,47 @@ Exit code 1. Under `--patch=12.0` the same file reports zero findings and exits 
 
 None of this comes from Blizzard's generated documentation, which carries no marker for aura secrecy. The 12.1 behaviour is published only in the patch notes, so these rules seed their taint from a list transcribed there, and `--patch` selects whether that list is active.
 
+### The 12.1.5 surface
+
+Patch 12.1.5 gave `CustomAuraButton` Pandemic-triggered animations, and paid for them with two new forbidden aspects: *"`QueryAnimationProgress`: prevents querying the progress of an animation or whether it is running"* and *"`AddAnimations`: prevents animations from being added or reparented."* The same notes close the cooldown APIs: *"the `SetCooldown` and `Clear` cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected."*
+
+`Core/Pandemic.lua` builds a glow the documented way and then keeps poking it:
+
+```lua
+local group = glow:CreateAnimationGroup()
+local fade = group:CreateAnimation("Alpha")
+fade:SetDuration(0.5)
+
+button:AddPandemicActiveAnimation(group)
+
+if group:IsPlaying() then group:Stop() end
+group:CreateAnimation("Scale")
+```
+
+`Core/Cooldowns.lua` drives one of Blizzard's action buttons:
+
+```lua
+local cooldown = _G["ActionButton1Cooldown"]
+cooldown:SetCooldown(GetTime(), 10)
+```
+
+```
+$ npx wow-secret-lint ./PandemicGlow
+Core/Cooldowns.lua:2:1  error  WSL021  cooldown:SetCooldown() cannot be called from tainted code in 12.1.5 because the cooldown frame itself is protected; drive your own Cooldown frame instead, or leave the protected one to Blizzard
+Core/Pandemic.lua:10:4  error  WSL019  querying the progress or running state of an animation group registered with a Pandemic trigger is disallowed by its QueryAnimationProgress forbidden aspect: group:IsPlaying()
+Core/Pandemic.lua:11:1  error  WSL020  adding an animation to an animation group registered with a Pandemic trigger is disallowed by its AddAnimations forbidden aspect: group:CreateAnimation()
+3 errors, 0 warnings
+```
+
+Exit code 1. The first five lines of `Core/Pandemic.lua` are Blizzard's own sample from the 12.1.5 notes and stay silent: building a group and filling it is fine, and the aspects arrive with the `AddPandemicActiveAnimation` call. `--patch=12.1` reports nothing at all in either file.
+
+If your `.toc` is still on an older interface, `--patch=auto` reads the number and checks the surface that addon actually ships against:
+
+```
+$ npx wow-secret-lint --patch=auto ./OldAddon    # ## Interface: 120100
+0 errors, 0 warnings
+```
+
 ### Exit codes
 
 | Code | Meaning |
@@ -126,7 +167,7 @@ Inputs:
 | Input | Default | Description |
 | --- | --- | --- |
 | `path` | `.` | addon folder, `.toc`, or `.lua`. Several allowed, space separated |
-| `patch` | `12.1` | patch surface to check; `12.0` pins the pre-12.1 rule set |
+| `patch` | `12.1.5` | patch surface to check; an older value pins that rule set, `auto` reads the addon `.toc` |
 | `args` | `""` | extra CLI arguments, e.g. `--conditional=warn --disable=WSL011` |
 | `format` | `github` | `github`, `stylish`, or `json` |
 
@@ -134,7 +175,7 @@ Outputs: `errors`, `warnings`.
 
 ## Rules
 
-Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014, WSL017 and WSL018 fail a build by default; the rest are warnings.
+Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014, WSL017, WSL018, WSL019, WSL020 and WSL021 fail a build by default; the rest are warnings.
 
 | Rule | Severity | What it catches |
 | --- | --- | --- |
@@ -156,6 +197,9 @@ Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` pr
 | WSL016 | warning | 12.1: `showCountdownFrame` passed to a private-aura API |
 | WSL017 | error | 12.1: forbidden-aspect operation on an AuraButton or AuraContainer |
 | WSL018 | error | 12.1: call of an aura API reached by index, slot or instance id |
+| WSL019 | error | 12.1.5: querying the progress or running state of an animation that carries `QueryAnimationProgress` |
+| WSL020 | error | 12.1.5: adding or reparenting an animation on a group that carries `AddAnimations` |
+| WSL021 | error | 12.1.5: `SetCooldown`/`Clear` on a cooldown frame Blizzard protects |
 
 WSL008 comes from the [12.0.0 API changes](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes): *"COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them."* Use `COMBAT_LOG_EVENT_INTERNAL_UNFILTERED` or the `C_CombatLog` namespace.
 
@@ -184,6 +228,35 @@ The rename is the minimal fix, but it is probably not the one you want. Reportin
 **WSL018** is the one that catches code WSL012 cannot. The notes say the by-index, by-slot and by-instance-id aura APIs *"will Lua error when called by addons while auras are secret"*, so the call is the failure, not what you do with the result. It therefore fires even where the result is guarded perfectly. BigWigs is the worked example: it has zero WSL012 findings because it guards every aura it reads, and four WSL018 findings because it still reaches those auras through `GetAuraDataByIndex`. Guarding the result cannot save a call that already threw. The `C_TooltipInfo` aura calls are included, but their returns are not treated as secret vectors, because the notes make no claim about their shape.
 
 **WSL017** knows a local is an AuraContainer or AuraButton when it comes from `CreateFrame("AuraContainer", ...)`/`CreateFrame("AuraButton", ...)` or arrives as the `initializeFrame` callback parameter of `AddAuraGroup`/`AddAuraSlot`/`AddItemEnchantment`, and it follows the value into a table field, so `self.buttons[i] = button` keeps the type. On those it flags `SetScript`/`HookScript`, event registration, input calls (`EnableMouse`, `RegisterForClicks`, `Click`, ...) and focus queries (`IsMouseOver`, ...), naming the forbidden aspect each one trips. Construction itself is never flagged.
+
+### The 12.1.5 rules in detail
+
+**WSL019** and **WSL020** are the two forbidden aspects 12.1.5 added. The notes name them outright: *"`QueryAnimationProgress`: prevents querying the progress of an animation or whether it is running"* and *"`AddAnimations`: prevents animations from being added or reparented"*. Unlike the 12.1 aura rules, this surface is in Blizzard's generated documentation, so the method lists are not transcribed by hand: every affected method carries `ChecksForbiddenAspects`, and the snapshot keeps them keyed by widget system. That is 8 methods on `SimpleAnimAPI` and 8 on `SimpleAnimGroupAPI` for `QueryAnimationProgress`, and `SimpleAnimGroupAPI:CreateAnimation` plus `SimpleAnimAPI:SetParent` for `AddAnimations`. The second of those is the "or reparented" half, and it is checked on the `parent` argument rather than on the receiver.
+
+The aspects are applied when an animation group is registered with a Pandemic trigger, which is what the notes mean by *"two new forbidden aspects were added to support this"* and *"animations used by Pandemic triggers also gain the existing `ChangeAnimationTarget` forbidden aspect"*. Blizzard's own sample in those notes builds the group, adds its animations, and registers it last, so an addon that follows that order is silent. Everything after `AddPandemicEnterAnimation`/`AddPandemicActiveAnimation`/`AddPandemicLeaveAnimation` is not:
+
+```lua
+local group = glow:CreateAnimationGroup()
+local fade = group:CreateAnimation("Alpha")   -- fine, the group is still yours
+button:AddPandemicActiveAnimation(group)      -- from here the client owns it
+
+if group:IsPlaying() then end                 -- WSL019
+group:CreateAnimation("Scale")                -- WSL020
+```
+
+Tracking follows the group through aliases, into a table field, and onto the animations that were already inside it when it was registered, and drops it the moment the local is reassigned. Guards do not silence either rule, for the same reason they do not silence WSL018: the call itself is what errors.
+
+**WSL021** covers *"the `SetCooldown` and `Clear` cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected"*. The six methods are the ones Blizzard newly marked `IsProtectedFunction = true` on `FrameAPICooldown` in 12.1.5 and marked on none of them in 12.1: `SetCooldown`, `SetCooldownDuration`, `SetCooldownFromDurationObject`, `SetCooldownFromExpirationTime`, `SetCooldownUNIX` and `Clear`. Reading a protected cooldown is untouched, and so is a cooldown frame your addon created.
+
+A cooldown counts as protected in two cases. It is one of Blizzard's action-button cooldowns, named directly, reached through `_G[...]` including a name built by concatenation, or reached as the `cooldown`/`chargeCooldown`/`lossOfControlCooldown` field of the button. The button names come from `Blizzard_ActionBar/Shared/ActionBar.lua`, which names each one `"ActionButton"..i`, `"StanceButton"..i`, `"PetActionButton"..i`, `"PossessButton"..i` or `actionBarName.."Button"..i` for the seven MultiBars, and `ActionButtonTemplate.xml` names the cooldown child `$parentCooldown` with `parentKey="cooldown"`. Or your own `Cooldown` inherits a `Secure*Template`, which is what "explicitly specified as protected at the time of creation" means for an addon.
+
+A cooldown your addon parents to a secure button is **not** protected, and that took a false positive to get right. `ScriptRegion:IsProtected` says protection travels the other way: *"anchoring or parenting a protected frame to another frame makes that frame implicitly protected as well"*, recursively, so the child is not the one that changes.
+
+```lua
+local cd = _G["ActionButton1Cooldown"]
+cd:SetCooldown(GetTime(), 10)   -- WSL021
+cd:IsPaused()                   -- silent, reading is not a protected function
+```
 
 ### What it will never flag
 
@@ -249,12 +322,13 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 
 | Mode | Errors | Warnings | Addons that would fail CI |
 | --- | --- | --- | --- |
-| `--patch=12.1` (default) | 379 | 121 | 9 of 12 |
+| `--patch=12.1.5` (default) | 379 | 121 | 9 of 12 |
+| `--patch=12.1` | 379 | 121 | 9 of 12 |
 | `--patch=12.1 --strict` | 489 | 11 | 9 of 12 |
 | `--patch=12.0` | 20 | 90 | 3 of 12 |
 | `--patch=12.0 --strict` | 110 | 0 | 5 of 12 |
 
-The two `12.0` rows are identical to what v1.2.0 reported, which is the point of the flag. Everything above them is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
+The two `12.0` rows are identical to what v1.2.0 reported, and the `12.1` rows to what v1.4.2 reported, which is the point of the flag. Everything above them is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
 
 | Rule | Count | Where |
 | --- | --- | --- |
@@ -264,8 +338,11 @@ The two `12.0` rows are identical to what v1.2.0 reported, which is the point of
 | WSL014 | 10 | mostly `GetInventorySlotInfo`, plus `GetInspectSpecialization`, `GetWeaponEnchantInfo` and SpartanUI's `UIParentLoadAddOn` |
 | WSL016 | 3 | oUF `privateauras.lua:133` and both copies vendored into KkthnxUI and SpartanUI |
 | WSL017 | 0 | no addon in the corpus uses AuraContainers yet; exercised by fixtures |
+| WSL019, WSL020, WSL021 | 0 | see below |
 
 Two numbers are worth reading together. **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard and the analysis credits that idiom. **BigWigs still has four WSL018 findings**, because guarding the result does not help when the call itself is what errors. That pair is the honest summary of where the ecosystem is: the careful addons did the guard work, and the guard work is not enough.
+
+The three 12.1.5 rules report **nothing** on this corpus, and nothing on a second pass on 2026-09-07 over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own interface code: 4,218 more files, zero findings. Four days after the patch, no addon in reach has adopted the Pandemic animation APIs, and none of them drives Blizzard's action-button cooldowns in a way a static reader can see. OmniCC gets closest and is the honest limit of the rule: it hooks `SetCooldown` on `getmetatable(ActionButton1Cooldown).__index` and dispatches through a proxy with the method name as a string, so the frame is never named at the call site. WSL021 sees a protected cooldown only where the file names one.
 
 A sample of the WSL012/WSL013 findings across every affected repo was read against its source by hand; each one performs an operation the 12.1 notes document as disallowed, on a value those notes document as secret, with no guard in scope. The pre-12.1 findings are unchanged from v1.2.0, where all 110 strict findings were read by hand.
 
@@ -295,8 +372,8 @@ Settling it needs someone to run a flagged line in game and watch what happens, 
 ```
 --format=<stylish|json|github>  output format (default: stylish)
 --game=<retail|classic>         classic has no secret values and exits 0 immediately
---patch=<12.0|12.1>             patch surface the built-in rules check (default: 12.1);
-                                12.0 pins the pre-12.1 rule set
+--patch=<12.0|12.1|12.1.5|auto> patch surface the built-in rules check (default: 12.1.5);
+                                an older value pins that rule set, auto reads the addon .toc
 --strict                        raise SecretReturns findings from warning to error
 --conditional=<off|warn|error>  conditionally secret APIs (default: off)
 --secret-guard=<names>          extra is-secret wrapper functions, comma separated
@@ -305,12 +382,36 @@ Settling it needs someone to run a flagged line in game and watch what happens, 
 --max-warnings=<n>              exit 1 when warnings exceed n
 --snapshot=<path>               use a different API snapshot
 --refresh                       rebuild the vendored API snapshot (the only networked command)
+--refresh-ref=<ref>             branch or tag of the mirror to rebuild from (default: live)
+--force                         let --refresh write an older client build than the vendored one
 --rules                         print the rule table with its sources
 ```
 
 ## Where the data comes from
 
-`data/api-snapshot.json` is built from Blizzard's generated API documentation, mirrored at [Gethe/wow-ui-source](https://github.com/Gethe/wow-ui-source) on the `live` branch. The current snapshot carries **10,098 documented functions and 752 structures**: 20 with `SecretReturns = true`, 310 conditionally secret, and per-field `NeverSecret` markers on 20 structures.
+`data/api-snapshot.json` is built from Blizzard's generated API documentation, mirrored at [Gethe/wow-ui-source](https://github.com/Gethe/wow-ui-source). The current snapshot is patch **12.1.5, build 69594**, rebuilt from that mirror's `12.1.5` tag, and carries **10,250 documented functions and 760 structures**: 20 with `SecretReturns = true`, 314 conditionally secret, and per-field `NeverSecret` markers on 20 structures. It also carries the widget markers the 12.1.5 rules read: `ChecksForbiddenAspects` and `IsProtectedFunction`, keyed by widget system because method names collide across widget types.
+
+This is the half of the release with no new rules in it and it still changes results. WSL006 and WSL007 consult the snapshot before they fire, so an addon that has already adopted a 12.1.5 API was being analysed against a documentation set that had never heard of the symbol:
+
+```
+$ npx wow-secret-lint --strict --snapshot=./api-snapshot-1.4.2.json Adopter.lua
+0 errors, 0 warnings
+
+$ npx wow-secret-lint --strict Adopter.lua
+Adopter.lua:2:24  error  WSL006  secret value passed to math.clamp(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: 'hp' derives from UnitHealth() (SecretReturns=true)
+Adopter.lua:3:29  error  WSL006  secret value passed to C_Intl.ToUpper(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)
+Adopter.lua:4:22  error  WSL006  secret value passed to string.startswith(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)
+3 errors, 0 warnings
+```
+
+The refresh also picked up a new conditional marker with no code change needed: `table.count`, `table.getcountinfo` and `table.isempty` carry `SecretWhenLuaTableHasSecretKeys`, so `--conditional=warn` reports them like any other `SecretWhen*` API.
+
+Every count on this page comes out of the snapshot itself:
+
+```bash
+node -p "const s=require('./data/api-snapshot.json'); [s.patch, s.build, s.functionCount, s.structureCount, s.secretReturnCount, s.conditionalCount, s.annotatedStructureCount].join(' ')"
+12.1.5 69594 10250 760 20 314 20
+```
 
 It is parsed with `luaparse`, not regexed, so nested tables and multi-line entries cannot skew it. Rebuild it any time:
 
@@ -320,7 +421,22 @@ npx wow-secret-lint --refresh
 
 A scheduled workflow in this repo does that weekly and opens a pull request when the docs move.
 
-The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot: Blizzard's generated documentation carries no marker for it, only the patch notes describe it, so the WSL012/WSL013 API lists live in `src/rules.mjs` with the source quoted, and `--patch` gates them. There is one snapshot, and `--snapshot`/`--refresh` behave the same under either patch.
+The mirror tags a client build before it moves its `live` branch, which is how 12.1.5 was picked up here on the day it shipped:
+
+```bash
+npx wow-secret-lint --refresh --refresh-ref=12.1.5
+```
+
+The snapshot records the patch and build it came from, read off the mirror's own commit message, and `--refresh` will not walk it backwards onto an older build without `--force`. Point it at a stale ref and it says so and leaves the file alone:
+
+```
+$ npx wow-secret-lint --refresh --refresh-ref=12.1.0
+rebuilding API snapshot from Gethe/wow-ui-source@12.1.0 ...
+wow-secret-lint: @12.1.0 is still 12.1.0 (build 69587), older than the vendored 12.1.5
+(build 69594); left the snapshot alone. Pass --force to write it anyway.
+```
+
+The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot: Blizzard's generated documentation carries no marker for it, only the patch notes describe it, so the WSL012/WSL013 API lists live in `src/rules.mjs` with the source quoted, and `--patch` gates them. The 12.1.5 rules are the other way round. Blizzard does mark those in the generated docs, so WSL019 and WSL020 read their method lists out of the snapshot and WSL021 reads the six `IsProtectedFunction` cooldown methods out of it; only the question of *which objects* carry the aspects lives in `src/rules.mjs`. There is one snapshot, and `--snapshot`/`--refresh` behave the same under every patch.
 
 ## Limitations and non-goals
 
@@ -330,7 +446,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 - **It cannot diagnose a taint-spread crash.** Some of the worst reports look like `attempt to perform arithmetic on local 'textHeight' (a secret number value, while execution tainted by 'YourAddon')` where every frame of the stack is a Blizzard file. Your addon tainted execution, and then Blizzard's code did the arithmetic. There is no forbidden operation in your Lua to point at, so this tool reports nothing. Running it over the real [aura-questor](https://github.com/lucascodev/aura-questor) source, which has exactly that open report, gives a clean run across 114 files. The regression fixture named after that issue reproduces the shape of the trace, not a finding in their code.
 - **No cross-file interprocedural analysis in v1.** Taint follows plain assignment, table field stores, the return value of a file-local function, and one level of intra-file call-argument passing. A secret that leaves through a global and comes back in another file is not tracked.
 - **No LuaJIT or Lua 5.4 syntax.** Files are parsed as Lua 5.1. WoW accepts a semicolon after `break`, which stock 5.1 does not, so a file that fails on 5.1 gets one retry under the 5.2 grammar before it is reported as a parse error.
-- **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 is the one exception, and its typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback. A button stored in a table field or passed across files is not tracked.
+- **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 and WSL019-WSL021 are the exceptions, and their typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback, an animation group carries the 12.1.5 aspects only from the `AddPandemic*Animation` call that registers it, and a cooldown is protected only where the file names Blizzard's frame or builds one from a secure template. Values that arrive across files, through a metatable hook, or through a proxy that takes the method name as a string are not tracked.
 - **XML is followed for `<Script>`/`<Include>` and checked only for removed templates.** WSL014 reads `inherits` attributes in every `.xml` the `.toc` pulls in, so a declarative aura header is caught. Nothing else in the markup is analysed: widget scripts written inline in XML are not parsed as Lua.
 - **`string.format` output is not tracked as secret.** The wiki names it as the sanctioned way to render a secret, and following it would flood every `SetText` call site. The trade is a known blind spot on `#string.format(...)`.
 - A `.toc` listing a file that is not on disk warns and keeps going. A file that will not parse is reported and the run exits 2.
@@ -341,7 +457,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-181 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 rule (`test/fixtures/rules-121/`), a fixture proving `--patch=12.0` reproduces the v1.2.0 output byte for byte (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
+228 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

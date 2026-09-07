@@ -281,7 +281,7 @@ describe('the --patch flag', () => {
 
   it('rejects an unknown patch value', async () => {
     const r = await run(['--patch=11.0', 'test/fixtures/clean']);
-    expect(r.stderr).toMatch(/unknown --patch "11\.0" \(expected 12\.0 or 12\.1\)/);
+    expect(r.stderr).toMatch(/unknown --patch "11\.0" \(expected 12\.0, 12\.1 or 12\.1\.5, or auto\)/);
     expect(r.code).toBe(2);
   });
 

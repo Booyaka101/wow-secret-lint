@@ -35,6 +35,18 @@ import {
   ASPECT_FRAME_TYPES,
   AURA_GROUP_METHODS,
   FORBIDDEN_ASPECT_METHODS,
+  patchAtLeast,
+  NEW_ASPECT_RULES,
+  ANIMATION_SYSTEMS,
+  PANDEMIC_KINDS,
+  PANDEMIC_ANIMATION_METHODS,
+  ANIMATION_FACTORIES,
+  COOLDOWN_SYSTEM,
+  COOLDOWN_FIELDS,
+  COOLDOWN_SUGGESTION,
+  PROTECTED_COOLDOWN_GLOBAL,
+  PROTECTED_BUTTON_GLOBAL,
+  isProtectedTemplate,
 } from './rules.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
@@ -102,9 +114,11 @@ class Analyzer {
     this.bindingSeq = 0;
     this.callDepth = 0;
     this.analysedWithTaint = new Set();
-    this.patch121 = options.patch !== '12.0';
-    this.widgetOf = new Map(); // dotted path -> 'AuraContainer' | 'AuraButton'
+    this.patch121 = patchAtLeast(options.patch, '12.1');
+    this.patch1215 = patchAtLeast(options.patch, '12.1.5');
+    this.widgetOf = new Map(); // dotted path -> widget kind, e.g. 'AuraButton', 'ProtectedCooldown'
     this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
+    this.animationOwner = new Map(); // animation path -> the group path it was created on
     this.stringConst = new Map(); // dotted path -> its string value, for `local PLAYER = "player"`
     this.guardArgDepth = 0; // > 0 while evaluating the arguments of a guard or scrubber call
   }
@@ -830,15 +844,21 @@ class Analyzer {
           );
         }
       } else {
-        const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
-        const widgetType = recv ? this.widgetOf.get(recv) : null;
-        const forbidden = widgetType ? FORBIDDEN_ASPECT_METHODS[widgetType][name] : null;
+        const recvNode = node.base ? node.base.base : null;
+        const recv = recvNode ? this.pathOf(recvNode) : null;
+        const widgetType = recvNode ? this.widgetKindOf(recvNode) : null;
+        const aspectMethods = widgetType ? FORBIDDEN_ASPECT_METHODS[widgetType] : null;
+        const forbidden = aspectMethods ? aspectMethods[name] : null;
         if (forbidden) {
           this.report(
             'WSL017',
             node,
             `${forbidden.verb} on an ${widgetType} is disallowed by its ${forbidden.aspect} forbidden aspect: ${recv}:${name}()`
           );
+        }
+        if (this.patch1215) {
+          this.applyPandemicAspects(name, args);
+          this.check1215(node, name, recvNode, widgetType, args);
         }
       }
     }
@@ -897,6 +917,151 @@ class Analyzer {
     // Unknown callee (widget method, external library). Blizzard's design allows secrets to
     // flow into widget setters, so this is a tracked-but-unverified use, not a violation.
     for (const t of argTaints) this.markUse(t, false);
+  }
+
+  // ----------------------------------------------------------- patch 12.1.5 checks
+
+  /** A string this file can resolve: a literal, a `local NAME = "..."`, or a concatenation. */
+  constString(node) {
+    if (!node) return null;
+    const lit = stringValue(node);
+    if (lit !== null) return lit;
+    if (node.type === 'NumericLiteral') return String(node.value);
+    if (node.type === 'BinaryExpression' && node.operator === '..') {
+      const left = this.constString(node.left);
+      const right = this.constString(node.right);
+      return left !== null && right !== null ? left + right : null;
+    }
+    const path = node.type === 'Identifier' ? node.name : this.pathOf(node);
+    return path && this.stringConst.has(path) ? this.stringConst.get(path) : null;
+  }
+
+  /** The global an expression names, whether written `Foo` or `_G["Foo"]`. */
+  globalName(node) {
+    if (!node) return null;
+    if (node.type === 'Identifier') return node.name;
+    const viaG =
+      (node.type === 'IndexExpression' || node.type === 'MemberExpression') &&
+      node.base.type === 'Identifier' &&
+      node.base.name === '_G';
+    if (!viaG) return null;
+    return node.type === 'MemberExpression' ? node.identifier.name : this.constString(node.index);
+  }
+
+  /**
+   * The widget kind of a receiver expression: a local this file has typed, one of Blizzard's
+   * action-button cooldowns named directly or through `_G`, or one reached as the cooldown
+   * field of one of those buttons.
+   */
+  widgetKindOf(node) {
+    if (!node) return null;
+    const path = this.pathOf(node);
+    if (path && this.widgetOf.has(path)) return this.widgetOf.get(path);
+    if (!this.patch1215) return null;
+    const global = this.globalName(node);
+    if (global && PROTECTED_COOLDOWN_GLOBAL.test(global)) return 'ProtectedCooldown';
+    if (global && PROTECTED_BUTTON_GLOBAL.test(global)) return 'ProtectedButton';
+    if (node.type === 'MemberExpression' && COOLDOWN_FIELDS.has(node.identifier.name)) {
+      if (this.widgetKindOf(node.base) === 'ProtectedButton') return 'ProtectedCooldown';
+    }
+    return null;
+  }
+
+  /** What the snapshot records about one method of one documented widget system. */
+  widgetMethod(system, name) {
+    const bucket = this.api.widgets ? this.api.widgets[system] : null;
+    return bucket && Object.prototype.hasOwnProperty.call(bucket, name) ? bucket[name] : null;
+  }
+
+  /**
+   * The widget kind a CreateFrame call produces. AuraContainer/AuraButton come from the
+   * frame type (12.1); a Cooldown built from a secure template is protected at creation,
+   * which is the only way an addon makes one (12.1.5).
+   */
+  createFrameKind(args) {
+    const frameType = stringValue(args[0]);
+    if (frameType && ASPECT_FRAME_TYPES.has(frameType)) return frameType;
+    if (!this.patch1215 || frameType !== 'Cooldown') return null;
+    const templates = this.constString(args[3]);
+    const secure = templates && templates.split(',').some((t) => isProtectedTemplate(t.trim()));
+    return secure ? 'ProtectedCooldown' : null;
+  }
+
+  /** The kind an animation factory call produces, e.g. `button:CreateAnimationGroup()`. */
+  animationKindFrom(node) {
+    const callee = this.calleeName(node);
+    if (!callee || !callee.method) return null;
+    const produced = ANIMATION_FACTORIES[callee.name];
+    if (!produced) return null;
+    const receiverKind = this.widgetKindOf(node.base.base);
+    return PANDEMIC_KINDS.has(receiverKind) ? `Pandemic${produced}` : produced;
+  }
+
+  /**
+   * `button:AddPandemicActiveAnimation(group)` and its two siblings are what apply the new
+   * aspects, to the group and to the animations already inside it. Nothing else does, which
+   * is why Blizzard's own sample builds the group first and registers it last.
+   */
+  applyPandemicAspects(name, args) {
+    if (!PANDEMIC_ANIMATION_METHODS.has(name)) return;
+    for (const a of args) {
+      const group = this.pathOf(a);
+      if (!group) continue;
+      this.widgetOf.set(group, 'PandemicAnimationGroup');
+      for (const [child, owner] of this.animationOwner) {
+        if (owner === group && this.widgetOf.get(child) === 'Animation') {
+          this.widgetOf.set(child, 'PandemicAnimation');
+        }
+      }
+    }
+  }
+
+  /**
+   * WSL019/WSL020/WSL021. Which methods carry which forbidden aspect, and which cooldown
+   * methods are protected, both come from the snapshot; this only decides whether the object
+   * the method is called on is one that carries them.
+   */
+  check1215(node, name, recvNode, kind, args) {
+    if (!kind) return;
+    const recv = this.pathOf(recvNode);
+    const callee = recv ? `${recv}:${name}` : name;
+
+    if (kind === 'ProtectedCooldown') {
+      const meta = this.widgetMethod(COOLDOWN_SYSTEM, name);
+      if (meta && meta.protected) {
+        this.report(
+          'WSL021',
+          node,
+          `${callee}() cannot be called from tainted code in 12.1.5 because the cooldown frame itself is protected; ${COOLDOWN_SUGGESTION}`
+        );
+      }
+      return;
+    }
+
+    const system = ANIMATION_SYSTEMS[kind];
+    const meta = system ? this.widgetMethod(system, name) : null;
+    for (const check of (meta && meta.aspects) || []) {
+      const rule = NEW_ASPECT_RULES[check.aspect];
+      if (!rule) continue; // ScriptBindings and ChangeAnimationTarget predate 12.1.5
+      if (check.argument === 'self') {
+        if (!PANDEMIC_KINDS.has(kind)) continue;
+        this.report(
+          rule.ruleId,
+          node,
+          `${rule.verb} ${describeAnimation(kind)} is disallowed by its ${check.aspect} forbidden aspect: ${callee}()`
+        );
+        continue;
+      }
+      const argNode = args[check.index];
+      const argKind = argNode ? this.widgetKindOf(argNode) : null;
+      if (!PANDEMIC_KINDS.has(argKind)) continue;
+      this.report(
+        rule.ruleId,
+        argNode,
+        `${rule.argVerb} ${describeAnimation(argKind)} is disallowed by its ${check.aspect} forbidden aspect: ` +
+          `${callee}(${this.pathOf(argNode) ?? ''})`
+      );
+    }
   }
 
   // ------------------------------------------------------------- patch 12.1 checks
@@ -989,9 +1154,12 @@ class Analyzer {
     this.widgetOf.delete(path);
     this.tableFields.delete(path);
     this.stringConst.delete(path);
+    this.animationOwner.delete(path);
     if (!init) return;
-    if (init.type === 'StringLiteral') {
-      this.stringConst.set(path, stringValue(init));
+    // `local PLAYER = "player"` and `local name = prefix .. i .. "Cooldown"` both resolve.
+    const constant = this.constString(init);
+    if (constant !== null) {
+      this.stringConst.set(path, constant);
       return;
     }
     if (init.type === 'TableConstructorExpression') {
@@ -1001,15 +1169,25 @@ class Analyzer {
     if (init.type === 'CallExpression') {
       const callee = this.calleeName(init);
       if (callee && !callee.method && callee.name === 'CreateFrame') {
-        const frameType = stringValue(init.arguments[0]);
-        if (frameType && ASPECT_FRAME_TYPES.has(frameType)) this.widgetOf.set(path, frameType);
+        const kind = this.createFrameKind(init.arguments);
+        if (kind) this.widgetOf.set(path, kind);
+        return;
+      }
+      if (this.patch1215) {
+        const animation = this.animationKindFrom(init);
+        if (animation) {
+          this.widgetOf.set(path, animation);
+          const owner = this.pathOf(init.base.base);
+          if (owner && animation.endsWith('Animation')) this.animationOwner.set(path, owner);
+        }
       }
       return;
     }
     // `self.buttons[i] = button` inside initializeFrame: carry the widget type to the
-    // field so operations on it later are still checked.
-    const from = this.pathOf(init);
-    if (from && this.widgetOf.has(from)) this.widgetOf.set(path, this.widgetOf.get(from));
+    // field so operations on it later are still checked. `_G["ActionButton1Cooldown"]` and
+    // `button.cooldown` resolve here too, once 12.1.5 makes protected cooldowns interesting.
+    const from = this.widgetKindOf(init);
+    if (from) this.widgetOf.set(path, from);
   }
 
   crossBoundary(local, name, args, argTaints, node, scope) {
@@ -1197,6 +1375,13 @@ function guardsParamIn(analyzer, fnNode, paramName) {
   return found;
 }
 
+/** How a finding names an animation object that carries the 12.1.5 aspects. */
+function describeAnimation(kind) {
+  return kind === 'PandemicAnimation'
+    ? 'an animation of a group registered with a Pandemic trigger'
+    : 'an animation group registered with a Pandemic trigger';
+}
+
 function exits(body) {
   const last = body[body.length - 1];
   return !!last && (last.type === 'ReturnStatement' || last.type === 'BreakStatement');
@@ -1224,7 +1409,7 @@ const INHERITS_ATTR = /\binherits\s*=\s*(["'])([^"']+)\1/gi;
  */
 export function analyzeXml(source, filePath, options = {}) {
   const disable = options.disable instanceof Set ? options.disable : new Set(options.disable ?? []);
-  if ((options.patch ?? DEFAULT_PATCH) === '12.0') return [];
+  if (!patchAtLeast(options.patch ?? DEFAULT_PATCH, '12.1')) return [];
   if (disable.has('WSL014')) return [];
 
   const findings = [];

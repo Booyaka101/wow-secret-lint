@@ -4,9 +4,42 @@
 const WIKI = 'https://warcraft.wiki.gg/wiki/Secret_Values';
 const PATCH = 'https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes';
 const PATCH121 = 'https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes';
+const PATCH1215 = 'https://warcraft.wiki.gg/wiki/Patch_12.1.5/API_changes';
 
-export const PATCHES = ['12.0', '12.1'];
-export const DEFAULT_PATCH = '12.1';
+export const PATCHES = ['12.0', '12.1', '12.1.5'];
+export const DEFAULT_PATCH = '12.1.5';
+
+/** "12.0, 12.1 or 12.1.5", for error messages and help text. */
+export function patchList(patches = PATCHES) {
+  return patches.length < 2 ? patches.join('') : `${patches.slice(0, -1).join(', ')} or ${patches.at(-1)}`;
+}
+
+/**
+ * The lowest retail Interface number each surface applies from: 12.1.5 stamps .toc files
+ * 120105, 12.1.0 stamps 120100, and everything below that is the 12.0 surface.
+ */
+export const PATCH_INTERFACES = [
+  ['12.1.5', 120105],
+  ['12.1', 120100],
+  ['12.0', 0],
+];
+
+/** The patch surface an addon's declared Interface number asks for. */
+export function patchForInterface(id) {
+  const match = PATCH_INTERFACES.find(([, floor]) => id >= floor);
+  return match ? match[0] : DEFAULT_PATCH;
+}
+
+/** True when the selected patch surface is at or after `floor`. */
+export function patchAtLeast(patch, floor) {
+  const a = String(patch ?? DEFAULT_PATCH).split('.').map(Number);
+  const b = String(floor).split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d) return d > 0;
+  }
+  return true;
+}
 
 export const RULES = {
   WSL001: {
@@ -105,6 +138,24 @@ export const RULES = {
     patch: '12.1',
     summary: 'call of an aura API that errors while auras are secret',
     source: `${PATCH121} : "C_UnitAura and C_TooltipInfo APIs that provide access to aura data via index, slot, or instance ID will Lua error when called by addons while auras are secret."`,
+  },
+  WSL019: {
+    severity: 'error',
+    patch: '12.1.5',
+    summary: 'querying the progress or state of an animation carrying the QueryAnimationProgress aspect',
+    source: `${PATCH1215} : new forbidden aspect "QueryAnimationProgress: prevents querying the progress of an animation or whether it is running." Blizzard_APIDocumentationGenerated names the methods that check it with ChecksForbiddenAspects, and Enum.ForbiddenAspect documents it as "Restricts APIs that query the progress or state of animations."`,
+  },
+  WSL020: {
+    severity: 'error',
+    patch: '12.1.5',
+    summary: 'adding or reparenting an animation on a group carrying the AddAnimations aspect',
+    source: `${PATCH1215} : new forbidden aspect "AddAnimations: prevents animations from being added or reparented." Enum.ForbiddenAspect documents it as "Restricts APIs that add animations to animation groups."`,
+  },
+  WSL021: {
+    severity: 'error',
+    patch: '12.1.5',
+    summary: 'SetCooldown or Clear called on a protected cooldown frame',
+    source: `${PATCH1215} : "The SetCooldown and Clear cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected." Blizzard_APIDocumentationGenerated marks the six FrameAPICooldown methods IsProtectedFunction = true in 12.1.5 and marked none of them in 12.1.`,
   },
 };
 
@@ -407,6 +458,90 @@ export const FORBIDDEN_ASPECT_METHODS = {
     RegisterAllEvents: EVENT_REG,
   },
 };
+
+// ----------------------------------------------------------- patch 12.1.5 surface
+//
+// Unlike the 12.1 aura rules, this surface is in Blizzard's generated documentation: every
+// method that checks a forbidden aspect carries ChecksForbiddenAspects, and the six cooldown
+// methods gained IsProtectedFunction. The snapshot's `widgets` map holds both, so nothing
+// below lists methods; it only says which object a tracked local is, and which objects carry
+// the new aspects.
+
+/** The two forbidden aspects 12.1.5 added, and how each one reports. */
+export const NEW_ASPECT_RULES = {
+  QueryAnimationProgress: { ruleId: 'WSL019', verb: 'querying the progress or running state of' },
+  AddAnimations: {
+    ruleId: 'WSL020',
+    verb: 'adding an animation to',
+    argVerb: 'reparenting an animation onto',
+  },
+};
+
+/** Animation object kinds the analyser tracks, mapped to their documented system name. */
+export const ANIMATION_SYSTEMS = {
+  Animation: 'SimpleAnimAPI',
+  AnimationGroup: 'SimpleAnimGroupAPI',
+  PandemicAnimation: 'SimpleAnimAPI',
+  PandemicAnimationGroup: 'SimpleAnimGroupAPI',
+};
+
+/**
+ * The kinds that carry the new aspects. An animation group is plain until it is handed to a
+ * Pandemic trigger: the 12.1.5 notes say "Animations used by Pandemic triggers also gain the
+ * existing ChangeAnimationTarget forbidden aspect", and Blizzard's own sample builds the group
+ * and its animations first, then registers it. Flagging the build would flag that sample.
+ */
+export const PANDEMIC_KINDS = new Set(['PandemicAnimation', 'PandemicAnimationGroup']);
+
+/** AuraButton methods that register an animation group with a Pandemic trigger. */
+export const PANDEMIC_ANIMATION_METHODS = new Set([
+  'AddPandemicEnterAnimation',
+  'AddPandemicActiveAnimation',
+  'AddPandemicLeaveAnimation',
+]);
+
+/** Methods that hand back a new animation object, and the kind they produce. */
+export const ANIMATION_FACTORIES = { CreateAnimationGroup: 'AnimationGroup', CreateAnimation: 'Animation' };
+
+export const COOLDOWN_SYSTEM = 'FrameAPICooldown';
+
+/**
+ * A frame is protected when it "was explicitly specified as protected at the time of
+ * creation" (ScriptRegion:IsProtected), which for an addon means a secure template:
+ * "protection is generally inherited from specially designed templates such as
+ * SecureTemplates" (Secure Execution and Tainting).
+ *
+ * Protection does not run the other way down the frame tree. Parenting a protected frame to
+ * another frame protects the *parent*, implicitly and recursively, so a Cooldown an addon
+ * creates under a secure button is not itself protected and is not this rule's business.
+ */
+export function isProtectedTemplate(name) {
+  return name.startsWith('Secure');
+}
+
+/**
+ * Blizzard's action buttons, which "form the basis of the Blizzard action and spell buttons"
+ * that the protected-frame concept exists for. The names come from
+ * Blizzard_ActionBar/Shared/ActionBar.lua, which names each button "ActionButton"..i,
+ * "StanceButton"..i, "PetActionButton"..i, "PossessButton"..i, or actionBarName.."Button"..i
+ * for the seven MultiBars.
+ */
+const ACTION_BUTTON_NAME =
+  '(?:ActionButton|StanceButton|PetActionButton|PossessButton|MultiBar(?:BottomLeft|BottomRight|Left|Right|5|6|7)Button)\\d+';
+export const PROTECTED_BUTTON_GLOBAL = new RegExp(`^${ACTION_BUTTON_NAME}$`);
+
+/** Their cooldown children, named "$parentCooldown" in ActionButtonTemplate.xml. */
+export const PROTECTED_COOLDOWN_GLOBAL = new RegExp(`^${ACTION_BUTTON_NAME}Cooldown$`);
+
+/**
+ * The same cooldowns reached as a field of the button rather than by their own name, by the
+ * parentKeys ActionButtonTemplate.xml gives them: `<Cooldown parentKey="cooldown">`, plus
+ * lossOfControlCooldown and chargeCooldown.
+ */
+export const COOLDOWN_FIELDS = new Set(['cooldown', 'chargeCooldown', 'lossOfControlCooldown']);
+
+export const COOLDOWN_SUGGESTION =
+  'drive your own Cooldown frame instead, or leave the protected one to Blizzard';
 
 /**
  * Decide how a boolean test on a secret should be reported.

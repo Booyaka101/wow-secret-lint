@@ -5,15 +5,15 @@ import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource, analyzeXml } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
 import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
-import { DEFAULT_PATCH } from './rules.mjs';
+import { DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 
-export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH } from './rules.mjs';
+export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 export { analyzeSource, analyzeXml } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 
-export const VERSION = '1.4.2';
+export const VERSION = '1.5.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -21,7 +21,8 @@ export const VERSION = '1.4.2';
  * @param {string} target       path to an addon folder, a .toc, or a .lua file
  * @param {object} options
  * @param {'retail'|'classic'} options.game
- * @param {'12.0'|'12.1'} options.patch  which patch surface the built-in rules check (default 12.1)
+ * @param {'12.0'|'12.1'|'12.1.5'|'auto'} options.patch  which patch surface the built-in rules check
+ *   (default 12.1.5; 'auto' reads the addon's own .toc Interface number)
  * @param {'warn'|'error'|'off'} options.conditional  how to treat conditionally secret APIs
  * @param {string[]} options.disable  rule ids to silence
  * @param {string[]} options.secretGuards  extra is-secret wrapper names, e.g. IsSecret
@@ -73,8 +74,11 @@ export async function lint(target, options = {}) {
   /** @type {{relative: string, absolute: string}[]} */
   const xmlFiles = [];
 
+  /** Interface numbers the addon declares, for --patch=auto. */
+  const interfaces = [];
+
   if (info.isFile() && abs.toLowerCase().endsWith('.toc')) {
-    files = await filesFromToc(abs, result, cwd, xmlFiles);
+    files = await filesFromToc(abs, result, cwd, xmlFiles, interfaces);
   } else if (info.isFile()) {
     if (!abs.toLowerCase().endsWith('.lua')) {
       throw new Error(`not a Lua or .toc file: ${target}`);
@@ -96,7 +100,7 @@ export async function lint(target, options = {}) {
     if (retail.length) {
       const seen = new Set();
       for (const toc of retail) {
-        for (const f of await filesFromToc(toc.path, result, cwd, xmlFiles)) {
+        for (const f of await filesFromToc(toc.path, result, cwd, xmlFiles, interfaces)) {
           if (seen.has(f.absolute)) continue;
           seen.add(f.absolute);
           files.push(f);
@@ -121,13 +125,25 @@ export async function lint(target, options = {}) {
     }
   }
 
+  if (result.patch === 'auto') {
+    const label = toPosix(relative(cwd, abs)) || abs;
+    if (interfaces.length) {
+      result.patch = patchForInterface(Math.max(...interfaces));
+    } else {
+      result.patch = DEFAULT_PATCH;
+      result.warningsBeforeLint.push(
+        `${label}: no .toc Interface number to read, checking the ${DEFAULT_PATCH} surface`
+      );
+    }
+  }
+
   const analyzeOptions = {
     conditional: options.conditional ?? 'off',
     disable: new Set(options.disable ?? []),
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
     strict: options.strict === true,
-    patch: options.patch,
+    patch: result.patch,
   };
 
   for (const file of files) {
@@ -178,6 +194,7 @@ export async function lintPaths(paths, options = {}) {
   };
   for (const target of paths) {
     const result = await lint(target, options);
+    merged.patch = result.patch;
     merged.snapshot = result.snapshot;
     merged.filesScanned += result.filesScanned;
     merged.findings.push(...result.findings);
@@ -188,8 +205,9 @@ export async function lintPaths(paths, options = {}) {
   return merged;
 }
 
-async function filesFromToc(tocPath, result, cwd, xmlFiles = []) {
+async function filesFromToc(tocPath, result, cwd, xmlFiles = [], interfaces = []) {
   const toc = await parseToc(tocPath);
+  interfaces.push(...toc.interface.map(Number).filter((n) => Number.isFinite(n)));
   const { resolved, missing, xml } = await resolveTocFiles(toc);
   const seenXml = new Set(xmlFiles.map((f) => f.absolute));
   for (const absolute of xml || []) {
