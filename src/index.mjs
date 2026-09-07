@@ -12,8 +12,9 @@ export { analyzeSource, analyzeXml } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
+export { buildBaseline, applyBaseline, applyBaselineFile, readBaseline, writeBaseline } from './baseline.mjs';
 
-export const VERSION = '1.5.0';
+export const VERSION = '1.6.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.
@@ -54,6 +55,8 @@ export async function lint(target, options = {}) {
   const api = await loadSnapshot(options.snapshotPath);
   result.snapshot = {
     source: api.source,
+    patch: api.patch ?? null,
+    build: api.build ?? null,
     generated: api.generated,
     functionCount: api.functionCount,
     secretReturnCount: api.secretReturnCount,
@@ -146,6 +149,9 @@ export async function lint(target, options = {}) {
     patch: result.patch,
   };
 
+  // Files run in .toc load order, which is the order the client runs them, so a widget one
+  // file creates is known to every file after it.
+  const widgets = new Map();
   for (const file of files) {
     let source;
     try {
@@ -155,9 +161,15 @@ export async function lint(target, options = {}) {
       continue;
     }
     result.filesScanned += 1;
-    const { findings, parseError } = analyzeSource(source.replace(/^﻿/, ''), file.relative, api, analyzeOptions);
+    const { findings, exports, parseError } = analyzeSource(
+      source.replace(/^\uFEFF/, ''),
+      file.relative,
+      api,
+      { ...analyzeOptions, imports: widgets }
+    );
     if (parseError) result.parseErrors.push(parseError);
     result.findings.push(...findings);
+    for (const [path, kind] of exports) widgets.set(path, kind);
   }
 
   for (const file of xmlFiles) {

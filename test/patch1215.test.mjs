@@ -271,6 +271,50 @@ describe('12.1.5 protected cooldowns', () => {
   });
 });
 
+describe('12.1.5 cooldown hooks', () => {
+  const HOOK = 'local mt = getmetatable(ActionButton1Cooldown).__index\n';
+
+  it('treats the first parameter of a metatable-hooked handler as a cooldown that may be protected', () => {
+    const named =
+      'local Cooldown = {}\n' +
+      'function Cooldown:OnSetCooldown(start, duration)\n' +
+      '  self:SetCooldown(start, duration)\n' +
+      'end\n' +
+      HOOK +
+      'hooksecurefunc(mt, "SetCooldown", Cooldown.OnSetCooldown)\n';
+    expect(ids(named)).toEqual(['WSL021@3']);
+    const inline = HOOK + 'hooksecurefunc(mt, "Clear", function(cd) cd:Clear() end)\n';
+    expect(ids(inline)).toEqual(['WSL021@2']);
+    const local = 'local function onDuration(cd, d) cd:SetCooldownDuration(d) end\n' + HOOK + 'hooksecurefunc(mt, "SetCooldownDuration", onDuration)\n';
+    expect(ids(local)).toEqual(['WSL021@1']);
+  });
+
+  it('follows getmetatable through an addon-created Cooldown and a protected frame hooked directly', () => {
+    const own = 'local mine = CreateFrame("Cooldown")\nhooksecurefunc(getmetatable(mine).__index, "SetCooldown", function(cd) cd:SetCooldown(0, 1) end)\n';
+    expect(ids(own)).toEqual(['WSL021@2']);
+    const direct = 'hooksecurefunc(ActionButton2Cooldown, "SetCooldownUNIX", function(self) self:SetCooldownUNIX(0, 0) end)\n';
+    expect(ids(direct)).toEqual(['WSL021@1']);
+  });
+
+  it('is silent when the handler checks IsProtected, reads only, or hooks something else', () => {
+    const guarded = HOOK + 'hooksecurefunc(mt, "Clear", function(cd) if cd:IsProtected() then return end cd:Clear() end)\n';
+    expect(ids(guarded)).toEqual([]);
+    const notGuard = HOOK + 'hooksecurefunc(mt, "Clear", function(cd) if cd:IsForbidden() then return end cd:Clear() end)\n';
+    expect(ids(notGuard)).toEqual(['WSL021@2']);
+    const reads = HOOK + 'hooksecurefunc(mt, "SetCooldown", function(cd) cd:Pause() print(cd:GetCooldownTimes()) end)\n';
+    expect(ids(reads)).toEqual([]);
+    const unrelated = 'local t = {}\nhooksecurefunc(t, "SetCooldown", function(self) self:SetCooldown(0, 1) end)\n';
+    expect(ids(unrelated)).toEqual([]);
+    const byName = 'hooksecurefunc("CooldownFrame_Set", function(cd) cd:SetCooldown(0, 1) end)\n';
+    expect(ids(byName)).toEqual([]);
+  });
+
+  it('does not let IsProtected clear taint, only the protected-call check', () => {
+    const src = 'local hp = UnitHealth("t")\nif not f:IsProtected() then local x = hp * 2 end\n';
+    expect(ids(src)).toEqual(['WSL001@2']);
+  });
+});
+
 describe('patch surface helpers', () => {
   it('orders the surfaces', () => {
     expect(PATCHES).toEqual(['12.0', '12.1', '12.1.5']);

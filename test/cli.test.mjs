@@ -137,9 +137,11 @@ describe('cli', () => {
     expect(r.code).toBe(0);
   });
 
-  it('prints the version', async () => {
+  it('prints the version, then the snapshot it runs against', async () => {
     const r = await run(['--version']);
-    expect(r.stdout.trim()).toBe('1.5.0');
+    const [version, about] = r.stdout.trim().split('\n');
+    expect(version).toBe('1.6.0');
+    expect(about).toMatch(/^snapshot 12\.1\.5 \(build 69594\), generated /);
   });
 
   it('fails clearly on a path that does not exist', async () => {

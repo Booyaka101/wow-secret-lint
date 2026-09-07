@@ -245,7 +245,7 @@ describe('rule filtering and failure handling', () => {
   });
 
   it('handles an empty file', () => {
-    expect(run('')).toEqual({ findings: [], parseError: null });
+    expect(run('')).toEqual({ findings: [], exports: [], parseError: null });
   });
 
   it('handles a file that is only comments', () => {

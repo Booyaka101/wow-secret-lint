@@ -1,0 +1,10 @@
+## Interface: 120105
+## Title: Cross File
+## Notes: Widgets created in one file and used in another, in load order.
+
+Init.lua
+Buttons.lua
+Glow.lua
+Early.lua
+Late.lua
+Shadow.lua

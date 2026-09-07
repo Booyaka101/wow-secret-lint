@@ -542,6 +542,7 @@ export const COOLDOWN_FIELDS = new Set(['cooldown', 'chargeCooldown', 'lossOfCon
 
 export const COOLDOWN_SUGGESTION =
   'drive your own Cooldown frame instead, or leave the protected one to Blizzard';
+export const HOOK_SUGGESTION = 'return early when self:IsProtected(), or call it on a Cooldown frame of your own';
 
 /**
  * Decide how a boolean test on a secret should be reported.
