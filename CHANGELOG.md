@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.6.0 - 2026-09-07
+
+The four things 1.5.0 left on the table. No rule changes; the 12.0 and 12.1 baselines and
+the 12-addon corpus are byte-identical to 1.5.0.
+
+### Added
+
+- **`--baseline=<path>` and `--write-baseline=<path>`.** Record the findings an addon has
+  today, then gate CI on what is new. Entries key on file, rule and message with a count,
+  never on line and column, so edits above a known finding do not resurface it. Entries that
+  no longer match are counted and the summary says to re-record. The GitHub Action takes the
+  file through a new `baseline` input.
+- **Widget types cross files, in `.toc` load order.** An AuraContainer, AuraButton, animation
+  group or protected cooldown stored in a global, in `_G[...]`, or in the addon's private table
+  (`local _, ns = ...` or `local ns = select(2, ...)`) is known to every file loaded after the
+  one that created it, under whatever local name each file gives that table. A file that
+  redeclares the name as a local keeps its own meaning. Separate targets on one command line
+  do not share widgets.
+- **WSL021 sees metatable hooks.** A handler installed with
+  `hooksecurefunc(getmetatable(<a Cooldown>).__index, name, fn)` runs for every cooldown in
+  the game, so its first parameter is a cooldown that may be protected and a protected method
+  called on it is reported. Hooking a protected frame directly counts too. The guard the rule
+  asks for, `if self:IsProtected() then return end`, is recognised and clears the frame for
+  the rest of its block; `IsForbidden()` is not a substitute. OmniCC is clean under this
+  because its handlers call a proxy `Cooldown` of their own, never `self`.
+- **`--version` prints a second line** naming the snapshot patch and build the run uses. The
+  first line is still the bare version. JSON output carries `snapshot.patch` and
+  `snapshot.build` too.
+
+### Fixed
+
+- An early-exit guard (`if issecretvalue(x) then return end`) applied to the rest of its
+  block was never released when the block ended, so the path stayed cleared for the rest of
+  the file. No fixture and no corpus file changed output when this was fixed, but it was
+  wrong, and the new `IsProtected` guard would have inherited it.
+
+### Verified
+
+- 249 tests. The recorded 12.0 and 12.1 baselines match byte for byte. The 12-addon corpus
+  reports 379 errors and 121 warnings under both `--patch=12.1` and `--patch=12.1.5`, and
+  489/11 under `--strict`, all unchanged; 4,218 further files at current HEADs report nothing
+  from WSL019-WSL021.
+- Along the way: a `local Frame = Frame` upvalue cache sent the hook-target resolver into
+  infinite recursion on KkthnxUI and SpartanUI, caught by the corpus run before release.
+
 ## 1.5.0 - 2026-09-07
 
 Patch 12.1.5 (build 69594) went live on 2026-09-03. This catches the linter up to it: the

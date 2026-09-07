@@ -22,6 +22,11 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+function describeBaseline(b) {
+  const stale = b.stale ? `; ${b.stale} baseline ${b.stale === 1 ? 'entry' : 'entries'} no longer match, re-record with --write-baseline` : '';
+  return `${plural(b.suppressed, 'finding')} suppressed by baseline ${b.path}${stale}`;
+}
+
 export function formatStylish(result) {
   const lines = [];
   for (const w of result.warningsBeforeLint) lines.push(w);
@@ -40,6 +45,8 @@ export function formatStylish(result) {
   const w1 = Math.max(0, ...rows.map((r) => r[1].length));
   for (const r of rows) lines.push(`${pad(r[0], w0)}  ${pad(r[1], w1)}  ${r[2]}  ${r[3]}`);
 
+  if (result.baseline) lines.push(describeBaseline(result.baseline));
+
   const { errors, warnings } = counts(result);
   if (result.parseErrors.length) {
     lines.push(`${plural(result.parseErrors.length, 'parse error')}, ${plural(errors, 'error')}, ${plural(warnings, 'warning')}`);
@@ -57,6 +64,8 @@ export function formatJson(result) {
       patch: result.patch,
       snapshot: {
         source: result.snapshot.source,
+        patch: result.snapshot.patch ?? null,
+        build: result.snapshot.build ?? null,
         generated: result.snapshot.generated,
         functionCount: result.snapshot.functionCount,
         secretReturnCount: result.snapshot.secretReturnCount,
@@ -66,6 +75,7 @@ export function formatJson(result) {
       findings: result.findings,
       parseErrors: result.parseErrors,
       warnings: result.warningsBeforeLint,
+      ...(result.baseline ? { baseline: result.baseline } : {}),
       summary: { errors, warnings, parseErrors: result.parseErrors.length },
     },
     null,
@@ -88,6 +98,7 @@ export function formatGithub(result) {
       `::${level} file=${f.file},line=${f.line},col=${f.column},title=${esc(`${f.ruleId} ${RULES[f.ruleId].summary}`)}::${esc(`${f.ruleId}: ${f.message}`)}`
     );
   }
+  if (result.baseline) lines.push(`::notice::${esc(describeBaseline(result.baseline))}`);
   const { errors, warnings } = counts(result);
   lines.push(`::notice::${plural(errors, 'error')}, ${plural(warnings, 'warning')} from wow-secret-lint`);
   return lines.join('\n');

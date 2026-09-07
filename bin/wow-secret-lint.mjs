@@ -7,6 +7,7 @@ import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
 import { refreshSnapshot, writeSnapshot, loadSnapshot, SNAPSHOT_PATH, DEFAULT_REF } from '../src/apidata.mjs';
+import { applyBaselineFile, writeBaseline } from '../src/baseline.mjs';
 import { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchList, patchAtLeast } from '../src/rules.mjs';
 
 const USAGE = `wow-secret-lint ${VERSION}
@@ -36,6 +37,10 @@ Options:
   --access-guard=<names>          extra can-access wrapper functions, comma separated
   --disable=<ids>                 comma-separated rule ids to silence, e.g. WSL010,WSL011
   --max-warnings=<n>              exit 1 when warnings exceed n (default: unlimited)
+  --baseline=<path>               suppress the findings recorded in this file and report
+                                  only what is new since it was written
+  --write-baseline=<path>         record every finding of this run to the file and exit 0,
+                                  so an addon with a backlog can gate CI on new findings
   --snapshot=<path>               use a different API snapshot
   --refresh                       rebuild the vendored API snapshot from the public mirror
                                   (the only command that uses the network)
@@ -67,6 +72,8 @@ function parseArgs(argv) {
     secretGuards: [],
     accessGuards: [],
     maxWarnings: Infinity,
+    baseline: undefined,
+    writeBaseline: undefined,
     snapshot: undefined,
     refresh: false,
     refreshRef: DEFAULT_REF,
@@ -96,6 +103,8 @@ function parseArgs(argv) {
     else if (arg.startsWith('--access-guard')) opts.accessGuards.push(...value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean));
     else if (arg.startsWith('--disable')) opts.disable = value(arg, argv, () => i++).split(',').map((s) => s.trim()).filter(Boolean);
     else if (arg.startsWith('--max-warnings')) opts.maxWarnings = Number(value(arg, argv, () => i++));
+    else if (arg.startsWith('--write-baseline')) opts.writeBaseline = value(arg, argv, () => i++);
+    else if (arg.startsWith('--baseline')) opts.baseline = value(arg, argv, () => i++);
     else if (arg.startsWith('--refresh-ref')) opts.refreshRef = value(arg, argv, () => i++);
     else if (arg.startsWith('--snapshot')) opts.snapshot = value(arg, argv, () => i++);
     else if (arg.startsWith('-')) throw new Error(`unknown option "${arg}"`);
@@ -127,7 +136,11 @@ async function main() {
     return 0;
   }
   if (opts.version) {
-    process.stdout.write(`${VERSION}\n`);
+    // First line stays the bare version for scripts; the second says which API surface a
+    // bug report was produced against.
+    const snap = await loadSnapshot(opts.snapshot).catch(() => null);
+    const about = snap && snap.patch ? `snapshot ${snap.patch} (build ${snap.build ?? 'unknown'}), generated ${snap.generated ?? 'unknown'}` : 'snapshot unavailable';
+    process.stdout.write(`${VERSION}\n${about}\n`);
     return 0;
   }
   if (opts.rules) {
@@ -190,6 +203,7 @@ async function main() {
     if (!RULE_IDS.includes(id)) fail(`unknown rule id "${id}" in --disable (known: ${RULE_IDS.join(', ')})`);
   }
   if (Number.isNaN(opts.maxWarnings)) fail('--max-warnings needs a number');
+  if (opts.baseline && opts.writeBaseline) fail('use either --baseline or --write-baseline, not both');
   if (!opts.paths.length) {
     process.stderr.write(`wow-secret-lint: no path given\n\n${USAGE}`);
     process.exit(2);
@@ -225,6 +239,16 @@ async function main() {
   } catch (err) {
     fail(err.message);
   }
+
+  if (opts.writeBaseline) {
+    const baseline = await writeBaseline(opts.writeBaseline, merged).catch((err) => fail(`cannot write baseline: ${err.message}`));
+    process.stdout.write(format(merged, opts.format) + '\n');
+    process.stderr.write(
+      `wrote ${opts.writeBaseline}: ${baseline.entries.length} entries covering ${merged.findings.length} findings\n`
+    );
+    return 0;
+  }
+  if (opts.baseline) await applyBaselineFile(merged, opts.baseline).catch((err) => fail(err.message));
 
   process.stdout.write(format(merged, opts.format) + '\n');
 

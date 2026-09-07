@@ -14,6 +14,10 @@ inputs:
     description: 'Patch surface to check: 12.1.5 (default), 12.1, 12.0, or auto to read the addon .toc.'
     required: false
     default: '12.1.5'
+  baseline:
+    description: 'Path to a baseline recorded with --write-baseline; only findings not in it are reported.'
+    required: false
+    default: ''
   args:
     description: 'Extra CLI arguments, e.g. "--conditional=warn --disable=WSL011".'
     required: false

@@ -134,6 +134,23 @@ $ npx wow-secret-lint --patch=auto ./OldAddon    # ## Interface: 120100
 0 errors, 0 warnings
 ```
 
+### Gating CI on new findings only
+
+Nine of the twelve addons measured below fail CI on the default settings, some with over a hundred findings. Nobody adopts a linter that way. Record what is there today and gate on what is new:
+
+```bash
+npx wow-secret-lint ./MyAddon --write-baseline=wow-secret-lint.baseline.json
+npx wow-secret-lint ./MyAddon --baseline=wow-secret-lint.baseline.json
+```
+
+```
+$ npx wow-secret-lint --strict --baseline=baseline.json Core/UnitFrame.lua
+2 findings suppressed by baseline baseline.json
+0 errors, 0 warnings
+```
+
+The baseline keys each finding on file, rule and message with a count, never on line and column, so editing code above a known finding does not resurface it. The message already names the value and the API it came from, which is what makes that stable. A third identical finding in a file that had two is reported; an entry that matches nothing any more is counted and the summary line says to re-record. Paths are relative to where you run, so record and lint from the same directory. Commit the file next to your `.toc`; the GitHub Action takes it through the `baseline` input.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -168,6 +185,7 @@ Inputs:
 | --- | --- | --- |
 | `path` | `.` | addon folder, `.toc`, or `.lua`. Several allowed, space separated |
 | `patch` | `12.1.5` | patch surface to check; an older value pins that rule set, `auto` reads the addon `.toc` |
+| `baseline` | `""` | path to a file written with `--write-baseline`; only findings not in it are reported |
 | `args` | `""` | extra CLI arguments, e.g. `--conditional=warn --disable=WSL011` |
 | `format` | `github` | `github`, `stylish`, or `json` |
 
@@ -249,6 +267,8 @@ Tracking follows the group through aliases, into a table field, and onto the ani
 **WSL021** covers *"the `SetCooldown` and `Clear` cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected"*. The six methods are the ones Blizzard newly marked `IsProtectedFunction = true` on `FrameAPICooldown` in 12.1.5 and marked on none of them in 12.1: `SetCooldown`, `SetCooldownDuration`, `SetCooldownFromDurationObject`, `SetCooldownFromExpirationTime`, `SetCooldownUNIX` and `Clear`. Reading a protected cooldown is untouched, and so is a cooldown frame your addon created.
 
 A cooldown counts as protected in two cases. It is one of Blizzard's action-button cooldowns, named directly, reached through `_G[...]` including a name built by concatenation with a numeric loop counter (`"ActionButton" .. i .. "Cooldown"` resolves), or reached as the `cooldown`/`chargeCooldown`/`lossOfControlCooldown` field of the button. A local or parameter that happens to share one of those names is left alone. The button names come from `Blizzard_ActionBar/Shared/ActionBar.lua`, which names each one `"ActionButton"..i`, `"StanceButton"..i`, `"PetActionButton"..i`, `"PossessButton"..i` or `actionBarName.."Button"..i` for the seven MultiBars, and `ActionButtonTemplate.xml` names the cooldown child `$parentCooldown` with `parentKey="cooldown"`. Or your own `Cooldown` inherits a `Secure*Template`, which is what "explicitly specified as protected at the time of creation" means for an addon.
+
+The other way to reach a protected cooldown is not to name it at all. OmniCC and its relatives do `hooksecurefunc(getmetatable(ActionButton1Cooldown).__index, "SetCooldown", handler)`, which installs the handler on the Cooldown widget type itself, so it runs for every cooldown in the game including the protected ones. Inside such a handler the first parameter is treated as a cooldown that may be protected, and a protected method called on it is reported. `hooksecurefunc(ActionButton1Cooldown, ...)` on the frame directly counts too, `local mt = getmetatable(x).__index` is followed, and a `Cooldown` the addon created works as the metatable source, since the metatable is shared. The correct guard is recognised: `if self:IsProtected() then return end` clears the frame for the rest of the block. `IsForbidden()` does not, because forbidden and protected are different properties. OmniCC itself is clean under this, as it should be: its handlers hand the call to a proxy `Cooldown` frame of their own rather than calling `self`.
 
 A cooldown your addon parents to a secure button is **not** protected, and that took a false positive to get right. `ScriptRegion:IsProtected` says protection travels the other way: *"anchoring or parenting a protected frame to another frame makes that frame implicitly protected as well"*, recursively, so the child is not the one that changes.
 
@@ -342,7 +362,7 @@ The two `12.0` rows are identical to what v1.2.0 reported, and the `12.1` rows t
 
 Two numbers are worth reading together. **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard and the analysis credits that idiom. **BigWigs still has four WSL018 findings**, because guarding the result does not help when the call itself is what errors. That pair is the honest summary of where the ecosystem is: the careful addons did the guard work, and the guard work is not enough.
 
-The three 12.1.5 rules report **nothing** on this corpus, and nothing on a second pass on 2026-09-07 over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own interface code: 4,218 more files, zero findings. Four days after the patch, no addon in reach has adopted the Pandemic animation APIs, and none of them drives Blizzard's action-button cooldowns in a way a static reader can see. OmniCC gets closest and is the honest limit of the rule: it hooks `SetCooldown` on `getmetatable(ActionButton1Cooldown).__index` and dispatches through a proxy with the method name as a string, so the frame is never named at the call site. WSL021 sees a protected cooldown only where the file names one.
+The three 12.1.5 rules report **nothing** on this corpus, and nothing on a second pass on 2026-09-07 over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own interface code: 4,218 more files, zero findings. Cross-file widget typing and metatable-hook awareness, both added in 1.6.0, changed no number in either pass. Four days after the patch, no addon in reach has adopted the Pandemic animation APIs, and none of them drives Blizzard's action-button cooldowns in a way a static reader can see. OmniCC gets closest and is the honest limit of the rule: it hooks `SetCooldown` on `getmetatable(ActionButton1Cooldown).__index` and dispatches through a proxy with the method name as a string, so the frame is never named at the call site. WSL021 sees a protected cooldown only where the file names one.
 
 A sample of the WSL012/WSL013 findings across every affected repo was read against its source by hand; each one performs an operation the 12.1 notes document as disallowed, on a value those notes document as secret, with no guard in scope. The pre-12.1 findings are unchanged from v1.2.0, where all 110 strict findings were read by hand.
 
@@ -380,11 +400,14 @@ Settling it needs someone to run a flagged line in game and watch what happens, 
 --access-guard=<names>          extra can-access wrapper functions, comma separated
 --disable=<ids>                 rule ids to silence, e.g. WSL010,WSL011
 --max-warnings=<n>              exit 1 when warnings exceed n
+--baseline=<path>               report only findings not recorded in this file
+--write-baseline=<path>         record this run's findings to the file and exit 0
 --snapshot=<path>               use a different API snapshot
 --refresh                       rebuild the vendored API snapshot (the only networked command)
 --refresh-ref=<ref>             branch or tag of the mirror to rebuild from (default: live)
 --force                         let --refresh write an older client build than the vendored one
 --rules                         print the rule table with its sources
+--version                       the version, then the snapshot patch and build it runs against
 ```
 
 ## Where the data comes from
@@ -444,9 +467,9 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 - **No runtime component and no in-game addon.** This is a build-time linter.
 - **No Classic support.** Classic has no secret values, so `--game=classic` exits 0 immediately.
 - **It cannot diagnose a taint-spread crash.** Some of the worst reports look like `attempt to perform arithmetic on local 'textHeight' (a secret number value, while execution tainted by 'YourAddon')` where every frame of the stack is a Blizzard file. Your addon tainted execution, and then Blizzard's code did the arithmetic. There is no forbidden operation in your Lua to point at, so this tool reports nothing. Running it over the real [aura-questor](https://github.com/lucascodev/aura-questor) source, which has exactly that open report, gives a clean run across 114 files. The regression fixture named after that issue reproduces the shape of the trace, not a finding in their code.
-- **No cross-file interprocedural analysis in v1.** Taint follows plain assignment, table field stores, the return value of a file-local function, and one level of intra-file call-argument passing. A secret that leaves through a global and comes back in another file is not tracked.
+- **Taint does not cross files.** It follows plain assignment, table field stores, the return value of a file-local function, and one level of intra-file call-argument passing. A secret that leaves through a global and comes back in another file is not tracked. Widget types do cross files: see the next point.
 - **No LuaJIT or Lua 5.4 syntax.** Files are parsed as Lua 5.1. WoW accepts a semicolon after `break`, which stock 5.1 does not, so a file that fails on 5.1 gets one retry under the 5.2 grammar before it is reported as a parse error.
-- **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 and WSL019-WSL021 are the exceptions, and their typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback, an animation group carries the 12.1.5 aspects only from the `AddPandemic*Animation` call that registers it, and a cooldown is protected only where the file names Blizzard's frame or builds one from a secure template. Values that arrive across files, through a metatable hook, or through a proxy that takes the method name as a string are not tracked.
+- **Method calls are not resolved to a widget type**, so WSL006 only applies to plain and namespaced calls (`UnitHealth(...)`, `C_CVar.SetCVar(...)`), never to `frame:SetText(...)`. WSL017 and WSL019-WSL021 are the exceptions, and their typing is deliberately narrow: a local counts as an AuraContainer/AuraButton only when it comes straight from `CreateFrame` with a literal type string or from an `initializeFrame` callback, an animation group carries the 12.1.5 aspects only from the `AddPandemic*Animation` call that registers it, and a cooldown is protected only where the file names Blizzard's frame, builds one from a secure template, or receives one through a metatable hook. Those types do follow the addon across files, in `.toc` load order: a widget stored in a global, in `_G[...]`, or in the addon's private table (`local _, ns = ...` or `local ns = select(2, ...)`) is known to every file loaded after the one that created it, whatever local name each file gives that table. A widget passed through a function argument, returned from a function, or stored in any other table is still only known inside its own file, and a value dispatched through a proxy that takes the method name as a string is not tracked at all.
 - **XML is followed for `<Script>`/`<Include>` and checked only for removed templates.** WSL014 reads `inherits` attributes in every `.xml` the `.toc` pulls in, so a declarative aura header is caught. Nothing else in the markup is analysed: widget scripts written inline in XML are not parsed as Lua.
 - **`string.format` output is not tracked as secret.** The wiki names it as the sanctioned way to render a secret, and following it would flood every `SetText` call site. The trade is a known blind spot on `#string.format(...)`.
 - A `.toc` listing a file that is not on disk warns and keeps going. A file that will not parse is reported and the run exits 2.
@@ -457,7 +480,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-230 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
+249 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

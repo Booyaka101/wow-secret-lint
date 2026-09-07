@@ -9,6 +9,7 @@ import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
 import { RULE_IDS, PATCHES, DEFAULT_PATCH, patchList } from '../src/rules.mjs';
+import { applyBaselineFile } from '../src/baseline.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +47,7 @@ function fail(message) {
 const paths = splitArgs(input('path', '.'));
 const extra = splitArgs(input('args', ''));
 const fmt = input('format', 'github');
+let baselinePath = input('baseline', '');
 
 if (!FORMATS.includes(fmt)) fail(`unknown format "${fmt}" (expected one of: ${FORMATS.join(', ')})`);
 
@@ -94,6 +96,9 @@ for (let i = 0; i < extra.length; i++) {
     case '--snapshot':
       options.snapshotPath = val();
       break;
+    case '--baseline':
+      baselinePath = val();
+      break;
     default:
       fail(`unknown value in "args": ${key}`);
   }
@@ -129,6 +134,8 @@ try {
   fail(err.message);
 }
 
+if (baselinePath) await applyBaselineFile(merged, baselinePath).catch((err) => fail(err.message));
+
 process.stdout.write(format(merged, fmt) + '\n');
 
 const { errors, warnings } = counts(merged);
@@ -146,6 +153,7 @@ await summary(
     `(${merged.snapshot.secretReturnCount ?? 0} with \`SecretReturns=true\`).\n\n` +
     `**${errors} error(s), ${warnings} warning(s)**` +
     (merged.parseErrors.length ? `, ${merged.parseErrors.length} parse error(s)` : '') +
+    (merged.baseline ? `, ${merged.baseline.suppressed} suppressed by baseline` : '') +
     '\n\n' +
     (rows
       ? `| Location | Severity | Rule | Message |\n| --- | --- | --- | --- |\n${rows}\n` +

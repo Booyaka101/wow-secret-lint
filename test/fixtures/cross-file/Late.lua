@@ -1,0 +1,3 @@
+local _, ns = ...
+
+ns.late = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")

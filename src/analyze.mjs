@@ -44,12 +44,16 @@ import {
   COOLDOWN_SYSTEM,
   COOLDOWN_FIELDS,
   COOLDOWN_SUGGESTION,
+  HOOK_SUGGESTION,
   PROTECTED_COOLDOWN_GLOBAL,
   PROTECTED_BUTTON_GLOBAL,
   isProtectedTemplate,
 } from './rules.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
+
+/** Stands in for whatever name each file gives the addon's private table. */
+const NS_ROOT = '<ns>';
 const RELATIONAL = new Set(['<', '<=', '>', '>=', '==', '~=']);
 
 /** Depth-first walk of an AST subtree. Return false from `visit` to prune that branch. */
@@ -120,8 +124,13 @@ class Analyzer {
     this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
     this.animationOwner = new Map(); // animation path -> the group path it was created on
     this.loopCounters = new Set(); // numeric for-loop variables in scope, e.g. the i of "ActionButton"..i
+    this.unprotected = new Set(); // paths inside a branch that tested frame:IsProtected() false
+    this.hookedHandlers = new Set(); // function nodes hooksecurefunc installs on the Cooldown widget type
+    this.hookedHandlerNames = new Set(); // the same, by dotted name, for handlers defined out of line
     this.stringConst = new Map(); // dotted path -> its string value, for `local PLAYER = "player"`
     this.guardArgDepth = 0; // > 0 while evaluating the arguments of a guard or scrubber call
+    this.fileLocals = new Set(); // every name declared local anywhere in this file
+    this.nsLocal = null; // the local holding the addon's private table: `local _, ns = ...`
   }
 
   // ---------------------------------------------------------------- findings
@@ -395,6 +404,12 @@ class Analyzer {
     if (node.type === 'CallExpression') {
       const callee = this.calleeName(node);
       if (!callee) return empty;
+      // `if frame:IsProtected() then return end` is the check WSL021 asks for; it clears the
+      // frame for protected-method calls only, not for taint.
+      if (callee.method && callee.name === 'IsProtected') {
+        const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
+        return recv ? { whenTrue: [], whenFalse: [{ path: recv, prefix: false, set: 'unprotected' }] } : empty;
+      }
       const g = this.guardShape(callee);
       if (!g) return empty;
       // `obj:HasSecretValues()` guards the receiver; `issecretvalue(x)` guards its arguments.
@@ -421,16 +436,17 @@ class Analyzer {
   applyGuards(marks) {
     const added = [];
     for (const m of marks) {
-      if (!this.cleared.has(m.path)) {
-        this.cleared.add(m.path);
-        added.push(m.path);
+      const set = m.set === 'unprotected' ? this.unprotected : this.cleared;
+      if (!set.has(m.path)) {
+        set.add(m.path);
+        added.push({ set, path: m.path });
       }
     }
     return added;
   }
 
   releaseGuards(added) {
-    for (const p of added) this.cleared.delete(p);
+    for (const { set, path } of added) set.delete(path);
   }
 
   /**
@@ -451,12 +467,82 @@ class Analyzer {
   run(ast) {
     this.everGuarded = new Set();
     this.collectGuardedPaths(ast);
+    this.collectFileLocals(ast);
+    this.importWidgets(this.options.imports);
     const scope = new Scope(null);
     this.hoistLocalFunctions(ast.body, scope);
+    if (this.patch1215) this.collectCooldownHooks(ast);
     this.block(ast.body, scope);
     this.reportUnguarded();
     this.findings.sort((a, b) => a.line - b.line || a.column - b.column || a.ruleId.localeCompare(b.ruleId));
     return this.findings;
+  }
+
+  /**
+   * Pre-pass: every name this file declares local, and which of them is the addon's private
+   * table (`local ADDON, ns = ...` or `local ns = select(2, ...)`). Widget typing crosses
+   * files through globals and through that table, so both have to be told apart from
+   * ordinary locals.
+   */
+  collectFileLocals(root) {
+    const isVararg = (n) => n && n.type === 'VarargLiteral';
+    const isSelect2 = (n) =>
+      n &&
+      n.type === 'CallExpression' &&
+      n.base.type === 'Identifier' &&
+      n.base.name === 'select' &&
+      n.arguments.length === 2 &&
+      n.arguments[0].type === 'NumericLiteral' &&
+      n.arguments[0].value === 2 &&
+      isVararg(n.arguments[1]);
+    for (const stmt of root.body) {
+      if (stmt.type !== 'LocalStatement') continue;
+      stmt.variables.forEach((v, i) => {
+        const init = stmt.init ? stmt.init[i] : null;
+        if (v.type !== 'Identifier' || this.nsLocal) return;
+        if ((i === 1 && isVararg(stmt.init[0])) || isSelect2(init)) this.nsLocal = v.name;
+      });
+    }
+    walk(root, (n) => {
+      if (n.type === 'LocalStatement') {
+        for (const v of n.variables) if (v.type === 'Identifier') this.fileLocals.add(v.name);
+      } else if (n.type === 'FunctionDeclaration') {
+        if (n.isLocal && n.identifier && n.identifier.type === 'Identifier') this.fileLocals.add(n.identifier.name);
+        for (const prm of n.parameters || []) if (prm.type === 'Identifier') this.fileLocals.add(prm.name);
+      } else if (n.type === 'ForNumericStatement') {
+        this.fileLocals.add(n.variable.name);
+      } else if (n.type === 'ForGenericStatement') {
+        for (const v of n.variables) this.fileLocals.add(v.name);
+      }
+    });
+  }
+
+  /**
+   * Widget kinds earlier files in load order left behind, keyed by a path that is either a
+   * global or `<ns>.field` for the addon's private table. A global this file redeclares as a
+   * local keeps the local meaning.
+   */
+  importWidgets(imports) {
+    for (const [path, kind] of imports ?? []) {
+      const [root, ...rest] = path.split('.');
+      if (root === NS_ROOT) {
+        if (this.nsLocal) this.widgetOf.set([this.nsLocal, ...rest].join('.'), kind);
+      } else if (!this.fileLocals.has(root)) {
+        this.widgetOf.set(path, kind);
+      }
+    }
+  }
+
+  /** The widget kinds this file leaves for later files, in the same keyed form. */
+  exportWidgets() {
+    const out = [];
+    for (const [path, kind] of this.widgetOf) {
+      const [root, ...rest] = path.split('.');
+      if (root === '_G' && rest.length) out.push([rest.join('.'), kind]);
+      else if (this.nsLocal && root === this.nsLocal) out.push([[NS_ROOT, ...rest].join('.'), kind]);
+      else if (!this.fileLocals.has(root)) out.push([path, kind]);
+    }
+    return out;
   }
 
   /** Pre-pass: every path that any guard in this file mentions. */
@@ -495,10 +581,13 @@ class Analyzer {
   }
 
   block(body, scope) {
+    // An early exit guards the rest of its own block, not whatever comes after the block.
+    const added = [];
     for (const stmt of body) {
       const trailing = this.statement(stmt, scope);
-      if (trailing && trailing.length) this.applyGuards(trailing);
+      if (trailing && trailing.length) added.push(...this.applyGuards(trailing));
     }
+    this.releaseGuards(added);
   }
 
   /** Returns guard marks that apply to the rest of the enclosing block, if any. */
@@ -1010,6 +1099,67 @@ class Analyzer {
   }
 
   /**
+   * Handlers installed with `hooksecurefunc(getmetatable(<a Cooldown>).__index, name, fn)`
+   * run for every Cooldown in the game, the protected action-button ones included, so their
+   * first parameter is a cooldown that may be protected. Hooking a protected cooldown frame
+   * directly counts too, and `local mt = getmetatable(X).__index` is followed.
+   */
+  collectCooldownHooks(root) {
+    const inits = new Map();
+    walk(root, (n) => {
+      if (n.type !== 'LocalStatement') return;
+      n.variables.forEach((v, i) => {
+        if (v.type === 'Identifier' && n.init && n.init[i]) inits.set(v.name, n.init[i]);
+      });
+    });
+    const cooldownLike = (node) => {
+      if (!node) return false;
+      const global = this.globalName(node);
+      if (global && PROTECTED_COOLDOWN_GLOBAL.test(global)) return true;
+      const init = node.type === 'Identifier' ? inits.get(node.name) : node;
+      if (!init || init.type !== 'CallExpression') return false;
+      const callee = this.calleeName(init);
+      return !!callee && !callee.method && callee.name === 'CreateFrame' && stringValue(init.arguments[0]) === 'Cooldown';
+    };
+    // `local Frame = Frame` is a common upvalue cache; the seen set stops it looping.
+    const hooksCooldowns = (target, seen = new Set()) => {
+      if (!target) return false;
+      if (target.type === 'Identifier' && inits.has(target.name)) {
+        if (seen.has(target.name)) return false;
+        seen.add(target.name);
+        return hooksCooldowns(inits.get(target.name), seen);
+      }
+      if (target.type === 'MemberExpression' && target.identifier.name === '__index' && target.base.type === 'CallExpression') {
+        const callee = this.calleeName(target.base);
+        return !!callee && !callee.method && callee.name === 'getmetatable' && cooldownLike(target.base.arguments[0]);
+      }
+      const global = this.globalName(target);
+      return !!global && PROTECTED_COOLDOWN_GLOBAL.test(global);
+    };
+    walk(root, (n) => {
+      if (n.type !== 'CallExpression' || n.arguments.length < 3) return;
+      const callee = this.calleeName(n);
+      if (!callee || callee.method || callee.name !== 'hooksecurefunc') return;
+      if (!hooksCooldowns(n.arguments[0])) return;
+      const handler = n.arguments[2];
+      if (handler.type === 'FunctionDeclaration') this.hookedHandlers.add(handler);
+      else {
+        const name = this.pathOf(handler);
+        if (name) this.hookedHandlerNames.add(name);
+      }
+    });
+  }
+
+  /** The name a hooked handler receives the cooldown under: `self` for `function T:fn()`, else its first parameter. */
+  hookedSelfOf(fnNode) {
+    const byName = fnNode.identifier ? this.pathOf(fnNode.identifier) : null;
+    if (!this.hookedHandlers.has(fnNode) && !(byName && this.hookedHandlerNames.has(byName))) return null;
+    if (fnNode.identifier && fnNode.identifier.type === 'MemberExpression' && fnNode.identifier.indexer === ':') return 'self';
+    const first = (fnNode.parameters || [])[0];
+    return first && first.type === 'Identifier' ? first.name : null;
+  }
+
+  /**
    * `button:AddPandemicActiveAnimation(group)` and its two siblings are what apply the new
    * aspects, to the group and to the animations already inside it. Nothing else does, which
    * is why Blizzard's own sample builds the group first and registers it last.
@@ -1039,15 +1189,14 @@ class Analyzer {
     const recv = this.pathOf(recvNode) ?? (this.globalName(recvNode) ? '_G[...]' : null);
     const callee = recv ? `${recv}:${name}` : name;
 
-    if (kind === 'ProtectedCooldown') {
+    if (kind === 'ProtectedCooldown' || kind === 'HookedCooldown') {
       const meta = this.widgetMethod(COOLDOWN_SYSTEM, name);
-      if (meta && meta.protected) {
-        this.report(
-          'WSL021',
-          node,
-          `${callee}() cannot be called from tainted code in 12.1.5 because the cooldown frame itself is protected; ${COOLDOWN_SUGGESTION}`
-        );
-      }
+      if (!meta || !meta.protected || (recv && this.unprotected.has(recv))) return;
+      const why =
+        kind === 'HookedCooldown'
+          ? `runs in a handler hooksecurefunc installed on the Cooldown widget type, so it runs for the protected action-button cooldowns too, where tainted code cannot call it in 12.1.5; ${HOOK_SUGGESTION}`
+          : `cannot be called from tainted code in 12.1.5 because the cooldown frame itself is protected; ${COOLDOWN_SUGGESTION}`;
+      this.report('WSL021', node, `${callee}() ${why}`);
       return;
     }
 
@@ -1249,6 +1398,8 @@ class Analyzer {
     const inner = new Scope(scope);
     const params = fnNode.parameters || [];
     const paramBindings = new Map();
+    const hookedSelf = this.hookedSelfOf(fnNode);
+    if (hookedSelf) this.widgetOf.set(hookedSelf, 'HookedCooldown');
     params.forEach((p, i) => {
       if (p.type !== 'Identifier') return;
       const hit = taintedParams.find((tp) => tp.index === i);
@@ -1265,6 +1416,7 @@ class Analyzer {
     });
     this.hoistLocalFunctions(fnNode.body, inner);
     this.block(fnNode.body, inner);
+    if (hookedSelf) this.widgetOf.delete(hookedSelf);
     if (!taintedParams.length) this.recordReturnTaint(fnNode, inner);
     return paramBindings;
   }
@@ -1448,8 +1600,9 @@ export function analyzeXml(source, filePath, options = {}) {
 }
 
 /**
- * Analyse one Lua source file.
- * @returns {{ findings: object[], parseError: object|null }}
+ * Analyse one Lua source file. `options.imports` carries the widget kinds earlier files in
+ * load order exported; `exports` in the result is this file's contribution for the next.
+ * @returns {{ findings: object[], exports: Array<[string, string]>, parseError: object|null }}
  */
 export function analyzeSource(source, filePath, api, options = {}) {
   const opts = {
@@ -1460,6 +1613,7 @@ export function analyzeSource(source, filePath, api, options = {}) {
     strict: options.strict === true,
     // 'auto' is resolved from the .toc by lint(); a bare file has no .toc to read.
     patch: !options.patch || options.patch === 'auto' ? DEFAULT_PATCH : options.patch,
+    imports: options.imports ?? [],
   };
   const parseOptions = { locations: true, ranges: false, comments: false, scope: false };
   let ast;
@@ -1485,6 +1639,7 @@ export function analyzeSource(source, filePath, api, options = {}) {
     const column = typeof err.column === 'number' ? err.column + 1 : 0;
     return {
       findings: [],
+      exports: [],
       parseError: {
         file: filePath,
         line,
@@ -1494,5 +1649,6 @@ export function analyzeSource(source, filePath, api, options = {}) {
     };
   }
   const analyzer = new Analyzer({ api, filePath, options: opts });
-  return { findings: analyzer.run(ast), parseError: null };
+  const findings = analyzer.run(ast);
+  return { findings, exports: analyzer.exportWidgets(), parseError: null };
 }
