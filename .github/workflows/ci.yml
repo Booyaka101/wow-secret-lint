@@ -29,13 +29,24 @@ jobs:
           if(r.status!==1)throw new Error('expected exit 1, got '+r.status)"
       - name: Acceptance - patch 12.0 pins the old surface
         run: node bin/wow-secret-lint.mjs --patch=12.0 test/fixtures/worked-example-121/Core/Auras.lua
+      - name: Acceptance - 12.1.5 forbidden aspects and protected cooldowns exit 1
+        run: >
+          node -e "const r=require('child_process').spawnSync(process.execPath,
+          ['bin/wow-secret-lint.mjs','test/fixtures/worked-example-1215'],{encoding:'utf8'});
+          if(r.status!==1)throw new Error('expected exit 1, got '+r.status);
+          for(const id of ['WSL019','WSL020','WSL021'])
+          if(!r.stdout.includes(id))throw new Error('missing '+id);
+          console.log(r.stdout.trim())"
+      - name: Acceptance - patch 12.1 pins the pre-12.1.5 surface
+        run: node bin/wow-secret-lint.mjs --patch=12.1 test/fixtures/worked-example-1215
       - name: Acceptance - snapshot has real Blizzard data
         run: >
           node -e "const s=require('./data/api-snapshot.json');
           if(s.functionCount<5000) throw new Error('snapshot too small: '+s.functionCount);
           if(!s.functions.UnitHealth.secretReturns) throw new Error('UnitHealth not secret');
           if(s.secretReturnCount<1) throw new Error('no SecretReturns entries');
-          console.log(s.functionCount+' functions, '+s.secretReturnCount+' SecretReturns')"
+          if(!s.widgets.FrameAPICooldown.SetCooldown.protected) throw new Error('no protected cooldown markers');
+          console.log(s.patch+' build '+s.build+': '+s.functionCount+' functions, '+s.secretReturnCount+' SecretReturns')"
 
   self-check:
     runs-on: ubuntu-latest

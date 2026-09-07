@@ -11,9 +11,9 @@ inputs:
     required: false
     default: '.'
   patch:
-    description: 'Patch surface to check: 12.1 (default) or 12.0 for addons pinned to the older client.'
+    description: 'Patch surface to check: 12.1.5 (default), 12.1, 12.0, or auto to read the addon .toc.'
     required: false
-    default: '12.1'
+    default: '12.1.5'
   args:
     description: 'Extra CLI arguments, e.g. "--conditional=warn --disable=WSL011".'
     required: false

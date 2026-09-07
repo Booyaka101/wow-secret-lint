@@ -1,0 +1,5 @@
+## Interface: 120100
+## Title: Old Addon
+## Notes: Declares the 12.1.0 interface, so --patch=auto must not apply 12.1.5 rules.
+
+Core/Pandemic.lua

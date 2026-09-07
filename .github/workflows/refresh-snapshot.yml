@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '17 5 * * 1'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag of Gethe/wow-ui-source to rebuild from'
+        required: false
+        default: live
 
 permissions:
   contents: write
@@ -18,15 +23,17 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: node bin/wow-secret-lint.mjs --refresh
+      # The mirror tags a new patch before it moves `live`, so this is a no-op until the
+      # branch catches up. Dispatch it with the tag (e.g. 12.1.5) to pick a patch up early.
+      - run: node bin/wow-secret-lint.mjs --refresh --refresh-ref=${{ inputs.ref || 'live' }}
       - run: node scripts/skip-if-unchanged.mjs
       - run: npm test
       - uses: peter-evans/create-pull-request@v7
         with:
-          commit-message: 'data: refresh API snapshot from wow-ui-source@live'
+          commit-message: "data: refresh API snapshot from wow-ui-source@${{ inputs.ref || 'live' }}"
           title: 'Refresh API snapshot'
           body: |
-            Rebuilt `data/api-snapshot.json` from the live mirror of Blizzard's
+            Rebuilt `data/api-snapshot.json` from the ${{ inputs.ref || 'live' }} mirror of Blizzard's
             generated API documentation. Tests passed against the new snapshot.
           branch: refresh-api-snapshot
           delete-branch: true

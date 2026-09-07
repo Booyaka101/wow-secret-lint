@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.5.0 - 2026-09-07
+
+Patch 12.1.5 (build 69594) went live on 2026-09-03. This catches the linter up to it: the
+snapshot, three new rules, and a new default `--patch` surface. `--patch=12.0` and
+`--patch=12.1` produce v1.2.0's and v1.4.2's output byte for byte, which is now enforced by
+recorded baselines rather than asserted.
+
+### Added
+
+- **WSL019** (error): querying the progress or running state of an animation that carries
+  the new `QueryAnimationProgress` forbidden aspect, which *"prevents querying the progress
+  of an animation or whether it is running"*.
+- **WSL020** (error): adding an animation to, or reparenting one onto, a group that carries
+  the new `AddAnimations` forbidden aspect, which *"prevents animations from being added or
+  reparented"*. The reparenting half is `SimpleAnim:SetParent`, where the aspect is checked
+  on the `parent` argument rather than on the receiver.
+- **WSL021** (error): *"the `SetCooldown` and `Clear` cooldown APIs can no longer be called
+  from tainted code when the cooldown frame itself is protected."* Blizzard marked six
+  `FrameAPICooldown` methods `IsProtectedFunction = true` in 12.1.5 and none in 12.1, so the
+  method list is read from the snapshot rather than transcribed.
+- **`--patch=12.1.5`, and it is the new default.** `PATCHES` is ordered now, so rules gate on
+  "at or after" a surface instead of a not-equals check against `12.0`.
+- **`--patch=auto`** reads the addon's own `## Interface` number and checks the surface it
+  actually ships against: 120105 and up gets 12.1.5, 120100 gets 12.1, older gets 12.0. It
+  says so and falls back to the default when there is no `.toc` to read.
+- **`--refresh-ref=<ref>`** rebuilds the snapshot from any branch or tag of the mirror, and
+  `--force` overrides the new guard that stops a refresh walking the snapshot backwards onto
+  an older client build. The mirror tags a build before it moves `live`, which is how 12.1.5
+  arrived here on the day it shipped; the weekly refresh workflow now reports that as a
+  no-op instead of a downgrade.
+
+### Changed
+
+- Refreshed `data/api-snapshot.json` from `Gethe/wow-ui-source@12.1.5`: 10,250 documented
+  functions and 760 structures, up from 10,099 and 752, with 20 `SecretReturns` (unchanged)
+  and 314 conditionally secret (up from 310). Every count is regenerated, not carried over.
+  The new globals are in it, so WSL006 and WSL007 stop analysing 12.1.5 code against a
+  snapshot that has never heard of `math.clamp`, `string.startswith`, `table.keys`,
+  `C_Intl`, `C_Weather`, `C_Timer.NewTimedSignalMap` or `CreateFrameWithOptions`. A file
+  passing a secret to `math.clamp`, `C_Intl.ToUpper` and `string.startswith` reports three
+  WSL006 errors against this snapshot and zero against 1.4.2's, which is the whole point of
+  the refresh. It also brought in a new conditional marker with no code change:
+  `SecretWhenLuaTableHasSecretKeys` on `table.count`, `table.getcountinfo` and
+  `table.isempty`.
+- The snapshot now carries two more Blizzard markers, keyed by widget system because method
+  names collide across widget types: `ChecksForbiddenAspects` (which forbidden aspect a
+  method checks, and on which argument) and `IsProtectedFunction`. It also records the patch,
+  build, commit and ref it was generated from.
+- A `local` bound to a folded string constant (`"PetActionButton" .. 4 .. "Cooldown"`) now
+  resolves the same way a plain string literal always did, and a numeric for-loop counter
+  inside one folds to a digit, so `_G["ActionButton" .. i .. "Cooldown"]` is recognised in
+  the loop every action-bar addon writes. A local or parameter that shares a Blizzard frame's
+  name is never taken for the frame.
+- The GitHub Action's `patch` input defaults to `12.1.5` and accepts `auto`.
+
+### Verified
+
+- 230 tests pass. `--patch=12.0` and `--patch=12.1`, with and without
+  `--strict --conditional=warn`, reproduce v1.4.2's output over the whole fixture corpus
+  byte for byte, recorded before any of this work started and checked by
+  `test/patch1215.test.mjs`.
+- On the 12-addon corpus the README measures, `--patch=12.1.5` reports the same 379 errors
+  and 121 warnings as `--patch=12.1`: the three new rules add nothing and take nothing away.
+  A second pass over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own
+  interface code, 4,076 further files, also reports nothing from them. Four days in, nobody
+  has adopted the Pandemic animation APIs yet.
+- One candidate finding was found and thrown out. An early draft treated a `Cooldown` created
+  under a secure-template button as protected, which flagged SpartanUI's quest button.
+  `ScriptRegion:IsProtected` says protection runs the other way: *"anchoring or parenting a
+  protected frame to another frame makes that frame implicitly protected as well"*, so the
+  child is not the one that changes. The inference was dropped and the rule now fires only
+  where the file names one of Blizzard's action-button cooldowns or builds a `Cooldown` from
+  a secure template.
+
 ## 1.4.2 - 2026-08-31
 
 Data only. No rule, message or analysis behaviour changed.

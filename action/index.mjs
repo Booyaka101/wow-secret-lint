@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { lintPaths, VERSION } from '../src/index.mjs';
 import { format, FORMATS, counts } from '../src/report.mjs';
-import { RULE_IDS, PATCHES, DEFAULT_PATCH } from '../src/rules.mjs';
+import { RULE_IDS, PATCHES, DEFAULT_PATCH, patchList } from '../src/rules.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -105,8 +105,8 @@ if (!['off', 'warn', 'error'].includes(options.conditional)) {
 if (!['retail', 'classic'].includes(options.game)) {
   fail(`unknown --game "${options.game}" (expected retail or classic)`);
 }
-if (!PATCHES.includes(options.patch)) {
-  fail(`unknown patch "${options.patch}" (expected ${PATCHES.join(' or ')})`);
+if (options.patch !== 'auto' && !PATCHES.includes(options.patch)) {
+  fail(`unknown patch "${options.patch}" (expected ${patchList()}, or auto)`);
 }
 for (const id of options.disable) {
   if (!RULE_IDS.includes(id)) fail(`unknown rule id "${id}" in --disable`);
@@ -142,7 +142,7 @@ const rows = merged.findings
 
 await summary(
   `## wow-secret-lint ${VERSION}\n\n` +
-    `${merged.filesScanned} Lua file(s) scanned against ${merged.snapshot.functionCount ?? 0} documented APIs ` +
+    `${merged.filesScanned} Lua file(s) scanned on the ${merged.patch} surface against ${merged.snapshot.functionCount ?? 0} documented APIs ` +
     `(${merged.snapshot.secretReturnCount ?? 0} with \`SecretReturns=true\`).\n\n` +
     `**${errors} error(s), ${warnings} warning(s)**` +
     (merged.parseErrors.length ? `, ${merged.parseErrors.length} parse error(s)` : '') +

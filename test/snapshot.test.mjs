@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { extractFile, buildIndex, loadSnapshot, SNAPSHOT_PATH, isConditionalKey } from '../src/apidata.mjs';
+import { extractFile, buildIndex, loadSnapshot, SNAPSHOT_PATH, isConditionalKey, parseBuildMessage } from '../src/apidata.mjs';
 
 // The exact UnitHealth entry as it appears in
 // Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua on the live branch.
@@ -125,6 +125,83 @@ describe('snapshot parser', () => {
   });
 });
 
+// One aspect-checking and one protected method, exactly as they appear in
+// SimpleAnimGroupAPIDocumentation.lua and FrameAPICooldownDocumentation.lua at 12.1.5.
+const WIDGET_DOC = `
+local SimpleAnimGroupAPI =
+{
+	Name = "SimpleAnimGroupAPI",
+	Type = "ScriptObject",
+
+	Functions =
+	{
+		{
+			Name = "IsPlaying",
+			Type = "Function",
+			ChecksForbiddenAspects = { { Argument = "self", Aspect = Enum.ForbiddenAspect.QueryAnimationProgress } },
+
+			Returns =
+			{
+				{ Name = "isPlaying", Type = "bool", Nilable = false },
+			},
+		},
+		{
+			Name = "SetParent",
+			Type = "Function",
+			ChecksForbiddenAspects = { { Argument = "parent", Aspect = Enum.ForbiddenAspect.AddAnimations } },
+
+			Arguments =
+			{
+				{ Name = "parent", Type = "SimpleAnimGroup", Nilable = false },
+				{ Name = "order", Type = "number", Nilable = true },
+			},
+		},
+		{
+			Name = "SetCooldown",
+			Type = "Function",
+			IsProtectedFunction = true,
+
+			Arguments =
+			{
+				{ Name = "start", Type = "Seconds", Nilable = false },
+			},
+		},
+	},
+};
+
+APIDocumentation:AddDocumentationTable(SimpleAnimGroupAPI);
+`;
+
+describe('12.1.5 widget markers', () => {
+  it('reads ChecksForbiddenAspects and resolves the argument position', () => {
+    const { functions } = extractFile(WIDGET_DOC, 'SimpleAnimGroupAPIDocumentation.lua');
+    const playing = functions.find((f) => f.name === 'IsPlaying');
+    expect(playing.aspects).toEqual([{ aspect: 'QueryAnimationProgress', argument: 'self' }]);
+    const parent = functions.find((f) => f.name === 'SetParent');
+    expect(parent.aspects).toEqual([{ aspect: 'AddAnimations', argument: 'parent', index: 0 }]);
+  });
+
+  it('reads IsProtectedFunction', () => {
+    const { functions } = extractFile(WIDGET_DOC, 'SimpleAnimGroupAPIDocumentation.lua');
+    expect(functions.find((f) => f.name === 'SetCooldown').protectedFunction).toBe(true);
+    expect(functions.find((f) => f.name === 'IsPlaying').protectedFunction).toBe(false);
+  });
+
+  it('keys them by system, because method names collide across widget types', () => {
+    const index = buildIndex([extractFile(WIDGET_DOC, 'SimpleAnimGroupAPIDocumentation.lua')]);
+    expect(index.widgets.SimpleAnimGroupAPI.IsPlaying.aspects[0].aspect).toBe('QueryAnimationProgress');
+    expect(index.widgets.SimpleAnimGroupAPI.SetCooldown.protected).toBe(true);
+    expect(index.widgets.SimpleAnimGroupAPI.SetParent.protected).toBeUndefined();
+  });
+
+  it('reads the patch and build out of the mirror commit message', () => {
+    expect(parseBuildMessage('12.1.5 (69594)')).toEqual({ patch: '12.1.5', build: 69594 });
+    expect(parseBuildMessage('12.1.0 (69587)\n\nmore text')).toEqual({ patch: '12.1.0', build: 69587 });
+    expect(parseBuildMessage('no build here')).toEqual({ patch: null, build: null });
+    expect(parseBuildMessage(undefined)).toEqual({ patch: null, build: null });
+  });
+});
+
 describe('vendored snapshot', () => {
   it('is real Blizzard data with UnitHealth.secretReturns === true', async () => {
     const api = await loadSnapshot();
@@ -146,6 +223,33 @@ describe('vendored snapshot', () => {
     expect(api.functions['C_LFGList.GetSearchResultInfo'].conditional).toContain('SecretInChatMessagingLockdown');
     expect(api.structures.SpellCooldownInfo.fields.isEnabled.neverSecret).toBe(true);
     expect(api.structures.LfgSearchResultData.fields.activityIDs.neverSecret).toBeUndefined();
+  });
+
+  it('is the 12.1.5 documentation, with the markers the 12.1.5 rules read', async () => {
+    const api = await loadSnapshot();
+    expect(api.patch).toBe('12.1.5');
+    expect(api.build).toBe(69594);
+    expect(api.widgets.SimpleAnimGroupAPI.IsPlaying.aspects).toContainEqual({
+      aspect: 'QueryAnimationProgress',
+      argument: 'self',
+    });
+    expect(api.widgets.SimpleAnimAPI.SetParent.aspects).toContainEqual({
+      aspect: 'AddAnimations',
+      argument: 'parent',
+      index: 0,
+    });
+    for (const name of ['Clear', 'SetCooldown', 'SetCooldownDuration', 'SetCooldownFromDurationObject', 'SetCooldownFromExpirationTime', 'SetCooldownUNIX']) {
+      expect(api.widgets.FrameAPICooldown[name].protected).toBe(true);
+    }
+  });
+
+  it('carries the globals patch 12.1.5 added', async () => {
+    const api = await loadSnapshot();
+    for (const name of ['math.clamp', 'math.lerp', 'math.round', 'string.contains', 'string.startswith', 'table.contains', 'table.keys', 'CreateFrameWithOptions']) {
+      expect(api.functions[name], name).toBeDefined();
+    }
+    expect(api.functions['C_Weather.GetCurrentWeather']).toBeDefined();
+    expect(Object.keys(api.functions).filter((k) => k.startsWith('C_Intl.')).length).toBeGreaterThan(20);
   });
 
   it('is valid JSON on disk', async () => {

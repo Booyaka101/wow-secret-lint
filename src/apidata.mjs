@@ -10,6 +10,16 @@
 //     SecretReturnsForAspect        active (cooldowns hidden, chat lockdown, arena, ...)
 //   NeverSecret / ConditionalSecret per-field markers on returned structures
 //
+// 12.1.5 added two more markers, both on widget methods rather than on returns:
+//
+//   ChecksForbiddenAspects         calling the method errors when the named argument carries
+//                                  that forbidden aspect (QueryAnimationProgress, AddAnimations, ...)
+//   IsProtectedFunction            the method cannot be called on a protected frame from
+//                                  tainted code
+//
+// Those two are keyed by system in `widgets`, because the flat function table keys on name
+// alone and method names collide across widget types.
+//
 // We parse the Lua rather than regexing it so nested tables and multi-line entries
 // cannot skew the result.
 
@@ -22,10 +32,15 @@ import luaparse from './luaparse.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SNAPSHOT_PATH = join(HERE, '..', 'data', 'api-snapshot.json');
 
-const CONTENTS_URL =
-  'https://api.github.com/repos/Gethe/wow-ui-source/contents/Interface/AddOns/Blizzard_APIDocumentationGenerated?ref=live';
-const RAW_BASE =
-  'https://raw.githubusercontent.com/Gethe/wow-ui-source/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/';
+const REPO = 'Gethe/wow-ui-source';
+const DOC_DIR = 'Interface/AddOns/Blizzard_APIDocumentationGenerated';
+
+/** Branch the mirror publishes the current live build on. */
+export const DEFAULT_REF = 'live';
+
+const contentsUrl = (ref) => `https://api.github.com/repos/${REPO}/contents/${DOC_DIR}?ref=${encodeURIComponent(ref)}`;
+const commitUrl = (ref) => `https://api.github.com/repos/${REPO}/commits/${encodeURIComponent(ref)}`;
+const rawBase = (ref) => `https://raw.githubusercontent.com/${REPO}/${encodeURIComponent(ref)}/${DOC_DIR}/`;
 
 /** A function-level key that makes the return value secret under some runtime condition. */
 export function isConditionalKey(key) {
@@ -117,6 +132,26 @@ function conditionsOf(entry) {
   return out;
 }
 
+/**
+ * The forbidden aspects a method checks, as `{ aspect, argument }`, or null. Most are checked
+ * on the receiver; SimpleAnim:SetParent checks AddAnimations on its `parent` argument instead,
+ * so the argument's position is resolved here rather than guessed at analysis time.
+ */
+function aspectsOf(entry, args) {
+  const list = Array.isArray(entry.ChecksForbiddenAspects) ? entry.ChecksForbiddenAspects : [];
+  const out = [];
+  for (const check of list) {
+    if (!check || typeof check !== 'object') continue;
+    const ref = check.Aspect && check.Aspect.__ref ? check.Aspect.__ref : null;
+    if (!ref) continue;
+    const argument = typeof check.Argument === 'string' ? check.Argument : 'self';
+    const rec = { aspect: ref.split('.').pop(), argument };
+    if (argument !== 'self') rec.index = args.findIndex((a) => a.name === argument);
+    out.push(rec);
+  }
+  return out.length ? out : null;
+}
+
 function mapReturns(list) {
   return (Array.isArray(list) ? list : [])
     .filter((r) => r && typeof r === 'object')
@@ -164,17 +199,20 @@ export function extractFile(luaSource, fileLabel = '<memory>') {
       if (f.Type && f.Type !== 'Function') continue;
       const returns = mapReturns(f.Returns);
       const conditional = conditionsOf(f);
+      const args = (Array.isArray(f.Arguments) ? f.Arguments : [])
+        .filter((a) => a && typeof a === 'object')
+        .map((a) => ({ name: a.Name ?? null, type: a.Type ?? null, nilable: a.Nilable === true }));
       for (const r of returns) if (r.conditionalSecret && !conditional.length) conditional.push('ConditionalSecret');
       functions.push({
         name: f.Name,
         namespace,
         system,
+        aspects: aspectsOf(f, args),
+        protectedFunction: f.IsProtectedFunction === true,
         secretReturns: f.SecretReturns === true || returns.some((r) => r.secretValue),
         conditional: conditional.length ? conditional : null,
         secretArguments: typeof f.SecretArguments === 'string' ? f.SecretArguments : null,
-        args: (Array.isArray(f.Arguments) ? f.Arguments : [])
-          .filter((a) => a && typeof a === 'object')
-          .map((a) => ({ name: a.Name ?? null, type: a.Type ?? null, nilable: a.Nilable === true })),
+        args,
         returns,
       });
     }
@@ -212,6 +250,7 @@ export function extractFile(luaSource, fileLabel = '<memory>') {
 export function buildIndex(files, meta = {}) {
   const functions = {};
   const structures = {};
+  const widgets = {};
   let secretReturnCount = 0;
   let conditionalCount = 0;
 
@@ -241,6 +280,13 @@ export function buildIndex(files, meta = {}) {
       };
       if (fn.secretReturns) secretReturnCount += 1;
       else if (fn.conditional) conditionalCount += 1;
+      if (fn.system && (fn.aspects || fn.protectedFunction)) {
+        const bucket = (widgets[fn.system] ??= {});
+        const rec = {};
+        if (fn.aspects) rec.aspects = fn.aspects;
+        if (fn.protectedFunction) rec.protected = true;
+        bucket[fn.name] = rec;
+      }
       const qualified = fn.namespace ? `${fn.namespace}.${fn.name}` : fn.name;
       put(qualified, entry, fn.secretReturns);
       // Namespaced functions usually also exist as a global alias in retail. Register the
@@ -253,16 +299,23 @@ export function buildIndex(files, meta = {}) {
   const sorted = (obj) =>
     Object.fromEntries(Object.keys(obj).sort().map((k) => [k, obj[k]]));
 
+  const ref = meta.ref ?? DEFAULT_REF;
   return {
-    source: 'Gethe/wow-ui-source@live Interface/AddOns/Blizzard_APIDocumentationGenerated',
+    source: `${REPO}@${ref} ${DOC_DIR}`,
+    ref,
+    patch: meta.patch ?? null,
+    build: meta.build ?? null,
+    commit: meta.commit ?? null,
     generated: meta.generated ?? null,
     files: meta.files ?? null,
     functionCount: Object.keys(functions).length,
     structureCount: Object.keys(structures).length,
     secretReturnCount,
     conditionalCount,
+    annotatedStructureCount: Object.values(structures).filter((s) => s.annotated).length,
     functions: sorted(functions),
     structures: sorted(structures),
+    widgets: Object.fromEntries(Object.keys(widgets).sort().map((k) => [k, sorted(widgets[k])])),
   };
 }
 
@@ -280,11 +333,20 @@ async function getJson(url) {
 }
 
 /**
- * Rebuild the snapshot from the live mirror. Only `--refresh` reaches the network.
+ * The patch and build the mirror tags a ref with. Gethe commits each client build as
+ * "12.1.5 (69594)", which is the only place the mirror records what it is a snapshot of.
+ */
+export function parseBuildMessage(message) {
+  const m = /^\s*(\d+(?:\.\d+)*)\s*\((\d+)\)/.exec(String(message ?? ''));
+  return m ? { patch: m[1], build: Number(m[2]) } : { patch: null, build: null };
+}
+
+/**
+ * Rebuild the snapshot from the mirror. Only `--refresh` reaches the network.
  * `onProgress` is called with ({ done, total, file }) so a long fetch narrates itself.
  */
-export async function refreshSnapshot({ onProgress, concurrency = 8, fetchImpl = fetch } = {}) {
-  const listing = await getJson(CONTENTS_URL);
+export async function refreshSnapshot({ ref = DEFAULT_REF, onProgress, concurrency = 8, fetchImpl = fetch } = {}) {
+  const listing = await getJson(contentsUrl(ref));
   if (!Array.isArray(listing)) throw new Error('GitHub contents API did not return a file listing');
   const names = listing
     .filter((f) => f.type === 'file' && f.name.endsWith('.lua'))
@@ -303,7 +365,7 @@ export async function refreshSnapshot({ onProgress, concurrency = 8, fetchImpl =
       if (i >= names.length) return;
       const name = names[i];
       try {
-        const res = await fetchImpl(RAW_BASE + name, { headers: { 'user-agent': 'wow-secret-lint' } });
+        const res = await fetchImpl(rawBase(ref) + name, { headers: { 'user-agent': 'wow-secret-lint' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         parsed[i] = extractFile(await res.text(), name);
       } catch (err) {
@@ -318,14 +380,27 @@ export async function refreshSnapshot({ onProgress, concurrency = 8, fetchImpl =
 
   if (failures.length > names.length / 10) {
     throw new Error(
-      `${failures.length}/${names.length} documentation files failed to download or parse; refusing to write a partial snapshot`
+      `${failures.length}/${names.length} documentation files failed to download or parse; refusing to write a ` +
+        `partial snapshot. First failure: ${failures[0].file}: ${failures[0].error}`
     );
+  }
+
+  let head = { patch: null, build: null, sha: null };
+  try {
+    const commit = await getJson(commitUrl(ref));
+    head = { ...parseBuildMessage(commit.commit && commit.commit.message), sha: commit.sha ?? null };
+  } catch {
+    // The documentation is what matters; an unreadable commit only costs the build stamp.
   }
 
   // Workers finish out of order; index in listing order so the snapshot is reproducible.
   const index = buildIndex(parsed.filter(Boolean), {
     generated: new Date().toISOString(),
     files: names.length,
+    ref,
+    patch: head.patch,
+    build: head.build,
+    commit: head.sha,
   });
   index.failures = failures;
   return index;
@@ -357,6 +432,7 @@ export async function loadSnapshot(path = SNAPSHOT_PATH) {
     throw new Error(`API snapshot at ${path} has no "functions" table; rebuild it with --refresh`);
   }
   index.structures ??= {};
+  index.widgets ??= {};
   cached = { path, index };
   return index;
 }
