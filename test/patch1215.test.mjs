@@ -250,6 +250,20 @@ describe('12.1.5 protected cooldowns', () => {
     expect(ids(src)).toEqual(['WSL021@2']);
   });
 
+  it('resolves the loop every action-bar addon writes, and only for Blizzard names', () => {
+    const loop = (body) => `for i = 1, 12 do\n  ${body}\nend\n`;
+    expect(ids(loop('_G["ActionButton" .. i .. "Cooldown"]:SetCooldown(0, 1)'))).toEqual(['WSL021@2']);
+    expect(ids(loop('local b = _G["MultiBar5Button" .. i]\n  b.cooldown:Clear()'))).toEqual(['WSL021@3']);
+    expect(ids(loop('local n = "PetActionButton" .. i .. "Cooldown"\n  _G[n]:SetCooldownDuration(1)'))).toEqual(['WSL021@3']);
+    expect(ids(loop('_G["MyBarButton" .. i .. "Cooldown"]:SetCooldown(0, 1)'))).toEqual([]);
+  });
+
+  it('does not mistake a local or parameter that shares a Blizzard name for the frame', () => {
+    expect(ids('local function Skin(ActionButton1Cooldown)\n  ActionButton1Cooldown:Clear()\nend\n')).toEqual([]);
+    expect(ids('local ActionButton1 = {}\nActionButton1.cooldown:Clear()\n')).toEqual([]);
+    expect(ids('ActionButton1Cooldown:Clear()\n')).toEqual(['WSL021@1']);
+  });
+
   it('reaches a Blizzard action button cooldown through the button field', () => {
     expect(ids('ActionButton1.cooldown:Clear()\n')).toEqual(['WSL021@1']);
     expect(ids('_G["ActionButton1"].chargeCooldown:Clear()\n')).toEqual(['WSL021@1']);

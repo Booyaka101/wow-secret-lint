@@ -119,6 +119,7 @@ class Analyzer {
     this.widgetOf = new Map(); // dotted path -> widget kind, e.g. 'AuraButton', 'ProtectedCooldown'
     this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
     this.animationOwner = new Map(); // animation path -> the group path it was created on
+    this.loopCounters = new Set(); // numeric for-loop variables in scope, e.g. the i of "ActionButton"..i
     this.stringConst = new Map(); // dotted path -> its string value, for `local PLAYER = "player"`
     this.guardArgDepth = 0; // > 0 while evaluating the arguments of a guard or scrubber call
   }
@@ -551,7 +552,10 @@ class Analyzer {
         for (const k of ['start', 'end', 'step']) if (stmt[k]) this.evaluate(stmt[k], scope);
         const inner = new Scope(scope);
         inner.declare(stmt.variable.name, null);
+        const counter = !this.loopCounters.has(stmt.variable.name);
+        if (counter) this.loopCounters.add(stmt.variable.name);
         this.block(stmt.body, inner);
+        if (counter) this.loopCounters.delete(stmt.variable.name);
         return null;
       }
       case 'ForGenericStatement': {
@@ -668,7 +672,7 @@ class Analyzer {
           this.cleared.delete(path);
         }
       }
-      if (this.patch121) this.trackPatchState(target, i < inits.length ? inits[i] : null);
+      if (this.patch121) this.trackPatchState(target, i < inits.length ? inits[i] : null, scope);
     });
     return null;
   }
@@ -846,7 +850,7 @@ class Analyzer {
       } else {
         const recvNode = node.base ? node.base.base : null;
         const recv = recvNode ? this.pathOf(recvNode) : null;
-        const widgetType = recvNode ? this.widgetKindOf(recvNode) : null;
+        const widgetType = recvNode ? this.widgetKindOf(recvNode, scope) : null;
         const aspectMethods = widgetType ? FORBIDDEN_ASPECT_METHODS[widgetType] : null;
         const forbidden = aspectMethods ? aspectMethods[name] : null;
         if (forbidden) {
@@ -858,7 +862,7 @@ class Analyzer {
         }
         if (this.patch1215) {
           this.applyPandemicAspects(name, args);
-          this.check1215(node, name, recvNode, widgetType, args);
+          this.check1215(node, name, recvNode, widgetType, args, scope);
         }
       }
     }
@@ -921,12 +925,18 @@ class Analyzer {
 
   // ----------------------------------------------------------- patch 12.1.5 checks
 
-  /** A string this file can resolve: a literal, a `local NAME = "..."`, or a concatenation. */
+  /**
+   * A string this file can resolve: a literal, a `local NAME = "..."`, or a concatenation of
+   * those. A numeric for-loop counter folds to "1", so `"ActionButton" .. i .. "Cooldown"`
+   * resolves to a name of the right shape; nothing that consumes the result cares which
+   * digit it was.
+   */
   constString(node) {
     if (!node) return null;
     const lit = stringValue(node);
     if (lit !== null) return lit;
     if (node.type === 'NumericLiteral') return String(node.value);
+    if (node.type === 'Identifier' && this.loopCounters.has(node.name)) return '1';
     if (node.type === 'BinaryExpression' && node.operator === '..') {
       const left = this.constString(node.left);
       const right = this.constString(node.right);
@@ -953,16 +963,18 @@ class Analyzer {
    * action-button cooldowns named directly or through `_G`, or one reached as the cooldown
    * field of one of those buttons.
    */
-  widgetKindOf(node) {
+  widgetKindOf(node, scope) {
     if (!node) return null;
     const path = this.pathOf(node);
     if (path && this.widgetOf.has(path)) return this.widgetOf.get(path);
     if (!this.patch1215) return null;
+    // A local or parameter that happens to share a Blizzard frame's name is not that frame.
+    if (node.type === 'Identifier' && scope && scope.lookupScope(node.name)) return null;
     const global = this.globalName(node);
     if (global && PROTECTED_COOLDOWN_GLOBAL.test(global)) return 'ProtectedCooldown';
     if (global && PROTECTED_BUTTON_GLOBAL.test(global)) return 'ProtectedButton';
     if (node.type === 'MemberExpression' && COOLDOWN_FIELDS.has(node.identifier.name)) {
-      if (this.widgetKindOf(node.base) === 'ProtectedButton') return 'ProtectedCooldown';
+      if (this.widgetKindOf(node.base, scope) === 'ProtectedButton') return 'ProtectedCooldown';
     }
     return null;
   }
@@ -988,12 +1000,12 @@ class Analyzer {
   }
 
   /** The kind an animation factory call produces, e.g. `button:CreateAnimationGroup()`. */
-  animationKindFrom(node) {
+  animationKindFrom(node, scope) {
     const callee = this.calleeName(node);
     if (!callee || !callee.method) return null;
     const produced = ANIMATION_FACTORIES[callee.name];
     if (!produced) return null;
-    const receiverKind = this.widgetKindOf(node.base.base);
+    const receiverKind = this.widgetKindOf(node.base.base, scope);
     return PANDEMIC_KINDS.has(receiverKind) ? `Pandemic${produced}` : produced;
   }
 
@@ -1021,9 +1033,10 @@ class Analyzer {
    * methods are protected, both come from the snapshot; this only decides whether the object
    * the method is called on is one that carries them.
    */
-  check1215(node, name, recvNode, kind, args) {
+  check1215(node, name, recvNode, kind, args, scope) {
     if (!kind) return;
-    const recv = this.pathOf(recvNode);
+    // `_G["ActionButton" .. i .. "Cooldown"]` has no path; say what was written instead.
+    const recv = this.pathOf(recvNode) ?? (this.globalName(recvNode) ? '_G[...]' : null);
     const callee = recv ? `${recv}:${name}` : name;
 
     if (kind === 'ProtectedCooldown') {
@@ -1053,7 +1066,7 @@ class Analyzer {
         continue;
       }
       const argNode = args[check.index];
-      const argKind = argNode ? this.widgetKindOf(argNode) : null;
+      const argKind = argNode ? this.widgetKindOf(argNode, scope) : null;
       if (!PANDEMIC_KINDS.has(argKind)) continue;
       this.report(
         rule.ruleId,
@@ -1143,7 +1156,7 @@ class Analyzer {
   }
 
   /** Keep the path -> widget-type and path -> table-fields maps in step with assignments. */
-  trackPatchState(target, init) {
+  trackPatchState(target, init, scope) {
     const path = target.type === 'Identifier' ? target.name : this.pathOf(target);
     if (!path) return;
     // `args.showCountdownFrame = true` after the constructor still counts as a field.
@@ -1174,7 +1187,7 @@ class Analyzer {
         return;
       }
       if (this.patch1215) {
-        const animation = this.animationKindFrom(init);
+        const animation = this.animationKindFrom(init, scope);
         if (animation) {
           this.widgetOf.set(path, animation);
           const owner = this.pathOf(init.base.base);
@@ -1186,7 +1199,7 @@ class Analyzer {
     // `self.buttons[i] = button` inside initializeFrame: carry the widget type to the
     // field so operations on it later are still checked. `_G["ActionButton1Cooldown"]` and
     // `button.cooldown` resolve here too, once 12.1.5 makes protected cooldowns interesting.
-    const from = this.widgetKindOf(init);
+    const from = this.widgetKindOf(init, scope);
     if (from) this.widgetOf.set(path, from);
   }
 
@@ -1409,7 +1422,8 @@ const INHERITS_ATTR = /\binherits\s*=\s*(["'])([^"']+)\1/gi;
  */
 export function analyzeXml(source, filePath, options = {}) {
   const disable = options.disable instanceof Set ? options.disable : new Set(options.disable ?? []);
-  if (!patchAtLeast(options.patch ?? DEFAULT_PATCH, '12.1')) return [];
+  const patch = !options.patch || options.patch === 'auto' ? DEFAULT_PATCH : options.patch;
+  if (!patchAtLeast(patch, '12.1')) return [];
   if (disable.has('WSL014')) return [];
 
   const findings = [];
@@ -1444,7 +1458,8 @@ export function analyzeSource(source, filePath, api, options = {}) {
     secretGuards: new Set(options.secretGuards ?? []),
     accessGuards: new Set(options.accessGuards ?? []),
     strict: options.strict === true,
-    patch: options.patch ?? DEFAULT_PATCH,
+    // 'auto' is resolved from the .toc by lint(); a bare file has no .toc to read.
+    patch: !options.patch || options.patch === 'auto' ? DEFAULT_PATCH : options.patch,
   };
   const parseOptions = { locations: true, ranges: false, comments: false, scope: false };
   let ast;

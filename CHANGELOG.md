@@ -49,13 +49,15 @@ recorded baselines rather than asserted.
   method checks, and on which argument) and `IsProtectedFunction`. It also records the patch,
   build, commit and ref it was generated from.
 - A `local` bound to a folded string constant (`"PetActionButton" .. 4 .. "Cooldown"`) now
-  resolves the same way a plain string literal always did. That removes a class of false
-  positive from WSL013 as well, where a unit token is built by concatenation.
+  resolves the same way a plain string literal always did, and a numeric for-loop counter
+  inside one folds to a digit, so `_G["ActionButton" .. i .. "Cooldown"]` is recognised in
+  the loop every action-bar addon writes. A local or parameter that shares a Blizzard frame's
+  name is never taken for the frame.
 - The GitHub Action's `patch` input defaults to `12.1.5` and accepts `auto`.
 
 ### Verified
 
-- 228 tests pass. `--patch=12.0` and `--patch=12.1`, with and without
+- 230 tests pass. `--patch=12.0` and `--patch=12.1`, with and without
   `--strict --conditional=warn`, reproduce v1.4.2's output over the whole fixture corpus
   byte for byte, recorded before any of this work started and checked by
   `test/patch1215.test.mjs`.

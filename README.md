@@ -248,7 +248,7 @@ Tracking follows the group through aliases, into a table field, and onto the ani
 
 **WSL021** covers *"the `SetCooldown` and `Clear` cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected"*. The six methods are the ones Blizzard newly marked `IsProtectedFunction = true` on `FrameAPICooldown` in 12.1.5 and marked on none of them in 12.1: `SetCooldown`, `SetCooldownDuration`, `SetCooldownFromDurationObject`, `SetCooldownFromExpirationTime`, `SetCooldownUNIX` and `Clear`. Reading a protected cooldown is untouched, and so is a cooldown frame your addon created.
 
-A cooldown counts as protected in two cases. It is one of Blizzard's action-button cooldowns, named directly, reached through `_G[...]` including a name built by concatenation, or reached as the `cooldown`/`chargeCooldown`/`lossOfControlCooldown` field of the button. The button names come from `Blizzard_ActionBar/Shared/ActionBar.lua`, which names each one `"ActionButton"..i`, `"StanceButton"..i`, `"PetActionButton"..i`, `"PossessButton"..i` or `actionBarName.."Button"..i` for the seven MultiBars, and `ActionButtonTemplate.xml` names the cooldown child `$parentCooldown` with `parentKey="cooldown"`. Or your own `Cooldown` inherits a `Secure*Template`, which is what "explicitly specified as protected at the time of creation" means for an addon.
+A cooldown counts as protected in two cases. It is one of Blizzard's action-button cooldowns, named directly, reached through `_G[...]` including a name built by concatenation with a numeric loop counter (`"ActionButton" .. i .. "Cooldown"` resolves), or reached as the `cooldown`/`chargeCooldown`/`lossOfControlCooldown` field of the button. A local or parameter that happens to share one of those names is left alone. The button names come from `Blizzard_ActionBar/Shared/ActionBar.lua`, which names each one `"ActionButton"..i`, `"StanceButton"..i`, `"PetActionButton"..i`, `"PossessButton"..i` or `actionBarName.."Button"..i` for the seven MultiBars, and `ActionButtonTemplate.xml` names the cooldown child `$parentCooldown` with `parentKey="cooldown"`. Or your own `Cooldown` inherits a `Secure*Template`, which is what "explicitly specified as protected at the time of creation" means for an addon.
 
 A cooldown your addon parents to a secure button is **not** protected, and that took a false positive to get right. `ScriptRegion:IsProtected` says protection travels the other way: *"anchoring or parenting a protected frame to another frame makes that frame implicitly protected as well"*, recursively, so the child is not the one that changes.
 
@@ -289,7 +289,7 @@ npx wow-secret-lint ./MyAddon --secret-guard=IsLocked --access-guard=CanRead
 
 Blizzard marks a second tier in the generated docs: functions that return a secret only while a specific restriction is active. `C_Spell.GetSpellCooldown` carries `SecretWhenCooldownsRestricted`; `C_LFGList.GetSearchResultInfo` carries `SecretInChatMessagingLockdown`; `UnitGUID`, `UnitName` and `UnitClass` carry `SecretWhenUnitIdentityRestricted`. In practice that means "secret in PvP, in restricted instances, and for non-player or pet units in combat". Your code works fine right up until it does not.
 
-Under the default `--patch=12.1`, the seven identity APIs WSL013 covers are promoted out of this tier and report as errors regardless of the `--conditional` setting. The rest of the tier is **off by default**, because measured against 12 real addons it produces about one warning per Lua file, which is a tax rather than a signal. Turn it on for a deeper audit:
+From `--patch=12.1` on, the identity APIs WSL013 covers are promoted out of this tier and report as errors regardless of the `--conditional` setting. The rest of the tier is **off by default**, because measured against 12 real addons it produces about one warning per Lua file, which is a tax rather than a signal. Turn it on for a deeper audit:
 
 ```bash
 npx wow-secret-lint ./MyAddon --conditional=warn    # report as warnings
@@ -457,7 +457,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-228 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
+230 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

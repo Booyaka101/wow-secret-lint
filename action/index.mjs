@@ -142,7 +142,7 @@ const rows = merged.findings
 
 await summary(
   `## wow-secret-lint ${VERSION}\n\n` +
-    `${merged.filesScanned} Lua file(s) scanned against ${merged.snapshot.functionCount ?? 0} documented APIs ` +
+    `${merged.filesScanned} Lua file(s) scanned on the ${merged.patch} surface against ${merged.snapshot.functionCount ?? 0} documented APIs ` +
     `(${merged.snapshot.secretReturnCount ?? 0} with \`SecretReturns=true\`).\n\n` +
     `**${errors} error(s), ${warnings} warning(s)**` +
     (merged.parseErrors.length ? `, ${merged.parseErrors.length} parse error(s)` : '') +
