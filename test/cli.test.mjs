@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -140,7 +141,10 @@ describe('cli', () => {
   it('prints the version, then the snapshot it runs against', async () => {
     const r = await run(['--version']);
     const [version, about] = r.stdout.trim().split('\n');
-    expect(version).toBe('1.6.0');
+    // Read the expected value rather than restating it: a literal here went
+    // stale across a release and only a clean-install check caught it.
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(version).toBe(pkg.version);
     expect(about).toMatch(/^snapshot 12\.1\.5 \(build 69594\), generated /);
   });
 

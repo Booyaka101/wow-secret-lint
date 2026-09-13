@@ -189,7 +189,26 @@ Inputs:
 | `args` | `""` | extra CLI arguments, e.g. `--conditional=warn --disable=WSL011` |
 | `format` | `github` | `github`, `stylish`, or `json` |
 
-Outputs: `errors`, `warnings`.
+Outputs: `errors`, `warnings`. Read them off the step:
+`${{ steps.<id>.outputs.errors }}`.
+
+### Runner requirements
+
+`action.yml` declares `runs.using: node24`. GitHub removes Node 20 from the
+Actions runners on **2026-09-23**, and an action still declaring `node20` does
+not launch after that: the runner cannot find the interpreter, so the step fails
+before the linter runs. Runners have defaulted to Node 24 since 2026-06-16.
+
+Two runner setups cannot run Node 24:
+
+- **macOS 13.4 and older**, including a `macos-13` runner not patched past 13.4.
+  Node 24 requires macOS >= 13.5. `macos-14` and later are fine.
+- **ARM32 self-hosted runners** (`linux/arm`, armv7l). Node.js publishes no
+  `linux-armv7l` build for 24 at all, and armv7 was downgraded to Experimental
+  in Node 24. ARM64 is unaffected.
+
+This applies to the Action only. The CLI still runs on Node 20 or newer, so
+`npx wow-secret-lint` on an ARM32 box is unaffected.
 
 ## Rules
 
@@ -480,7 +499,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-249 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
+258 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |
