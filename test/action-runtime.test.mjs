@@ -48,7 +48,9 @@ describe('action.yml runtime', () => {
     // Read the open runtimes out of the table rather than naming node24, and do
     // not use `node26` as the unknown: both would fail here the day GitHub
     // moves, which is what the first test is for.
-    const open = Object.keys(RUNTIMES).filter((k) => RUNTIMES[k].removedOn === null);
+    // Node runtimes only: composite and docker are not interpreters and never
+    // get a removal date, so including them makes the guard below unfailable.
+    const open = Object.keys(RUNTIMES).filter((k) => /^node/.test(k) && RUNTIMES[k].removedOn === null);
     expect(open.length).toBeGreaterThan(0);
     for (const k of open) expect(checkRuntime(k).ok, k).toBe(true);
     expect(checkRuntime('nodejs-latest').ok).toBe(false);
@@ -82,6 +84,25 @@ describe('validate:action', () => {
   it('passes action.yml despite the stale runs.using enum', () => {
     const r = spawnSync(process.execPath, [VALIDATE], { encoding: 'utf8' });
     expect(r.status, r.stdout + r.stderr).toBe(0);
+  });
+
+  it('does not narrow a runtime the schema already accepts', () => {
+    // `using: composite` with `main:` and no `steps:` is genuinely invalid, and
+    // composite is in the 0.6.0 enum. Probing it as node20 makes it validate
+    // clean, so the wrapper used to pass it and blame the runtime enum.
+    const run = (body) => withTempAction(body, (f) => spawnSync(process.execPath, [VALIDATE, f], { encoding: 'utf8' }));
+    const bad = run('name: x\ndescription: y\nruns:\n  using: composite\n  main: dist/index.mjs\n');
+    expect(bad.status, bad.stdout + bad.stderr).toBe(1);
+
+    // And what it reports is the file's own error, not the oneOf spray the probe
+    // produces by rewriting a valid composite action into a node20 one.
+    const noisy = run([
+      'bogus-top-level: 1', 'name: x', 'description: y', 'runs:', '  using: composite',
+      '  steps:', '    - run: echo hi', '      shell: bash', '',
+    ].join('\n'));
+    expect(noisy.status).toBe(1);
+    expect(noisy.stderr).toContain('bogus-top-level');
+    expect(noisy.stderr).not.toContain('one_of');
   });
 
   it('still fails on a schema error that is not the runtime', () => {

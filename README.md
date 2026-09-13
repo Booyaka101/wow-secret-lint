@@ -499,7 +499,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-258 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
+259 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

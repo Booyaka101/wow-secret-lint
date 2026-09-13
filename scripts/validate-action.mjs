@@ -20,7 +20,15 @@ import process from 'node:process';
 
 import { readUsing, withRuntime, checkRuntime } from './action-runtime.mjs';
 
-// The newest runtime the 0.6.0 schema knows about.
+// What the 0.6.0 schema's `runs.using` enum actually holds. If the declared
+// runtime is already in it, the validator's verdict is final: probing would swap
+// one runtime the schema accepts for another and pull in errors from a different
+// branch of the `runs` oneOf. A composite action missing `steps:` came back
+// "valid" that way, and a composite action with one real error came back with
+// sixty lines of invented ones.
+const SCHEMA_RUNTIMES = new Set(['node12', 'node16', 'node20', 'composite', 'docker']);
+
+// What the probe swaps in for a runtime the schema has never heard of.
 const SCHEMA_KNOWN_RUNTIME = 'node20';
 
 const CLI = createRequire(import.meta.url).resolve('@action-validator/cli/cli.mjs');
@@ -38,6 +46,12 @@ function validate(file) {
   return { ok: r.status === 0, output: (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
+function reportFailure(output) {
+  console.error(`validate-action: ${basename(target)} failed validation.\n`);
+  console.error(output.trim());
+  process.exit(1);
+}
+
 const using = readUsing(target);
 const runtime = checkRuntime(using);
 if (!runtime.ok) {
@@ -50,6 +64,9 @@ if (direct.ok) {
   console.log(`validate-action: ${basename(target)} is valid (runs.using: ${using}, ${runtime.reason}).`);
   process.exit(0);
 }
+
+// The schema knows this runtime, so the runtime is not what it objected to.
+if (SCHEMA_RUNTIMES.has(using)) reportFailure(direct.output);
 
 const tmp = mkdtempSync(join(tmpdir(), 'validate-action-'));
 const probe = join(tmp, 'action.yml');
@@ -66,8 +83,7 @@ if (swapped.ok) {
   process.exit(0);
 }
 
-console.error(`validate-action: ${basename(target)} failed validation.\n`);
-// The probe's errors, not the direct run's: the direct run still leads with
-// the stale runs.using complaint, which is the noise this wrapper drops.
-console.error(swapped.output.trim());
-process.exit(1);
+// The probe's errors, not the direct run's. This line is only reachable for a
+// runtime outside the enum, where the direct run leads with the complaint this
+// wrapper exists to drop.
+reportFailure(swapped.output);

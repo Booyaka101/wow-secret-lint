@@ -55,7 +55,7 @@ no fallback.
   path, still fails, which a test proves by planting an unrelated schema
   violation and asserting a non-zero exit.
 
-- **Nine runtime checks** (`test/action-runtime.test.mjs`, 249 -> 258). They
+- **Ten runtime checks** (`test/action-runtime.test.mjs`, 249 -> 259). They
   fail when `runs.using` names a runtime that is gone, or one within 180 days of
   its removal date. Setting `action.yml` back to `node20` turns the suite red
   today. The next runtime deadline arrives as a failing test rather than as a
