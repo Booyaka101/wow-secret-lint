@@ -45,16 +45,26 @@ describe('action.yml runtime', () => {
   });
 
   it('accepts a runtime with no announced removal, rejects an unknown one', () => {
-    expect(checkRuntime('node24').ok).toBe(true);
-    expect(RUNTIMES.node24.removedOn).toBe(null);
-    expect(checkRuntime('node26').ok).toBe(false);
+    // Read the open runtimes out of the table rather than naming node24, and do
+    // not use `node26` as the unknown: both would fail here the day GitHub
+    // moves, which is what the first test is for.
+    const open = Object.keys(RUNTIMES).filter((k) => RUNTIMES[k].removedOn === null);
+    expect(open.length).toBeGreaterThan(0);
+    for (const k of open) expect(checkRuntime(k).ok, k).toBe(true);
+    expect(checkRuntime('nodejs-latest').ok).toBe(false);
     expect(checkRuntime(null).ok).toBe(false);
+    expect(checkRuntime('').ok).toBe(false);
   });
 
   it('reads runs.using past quotes and comments, and ignores a lookalike key', () => {
     expect(withTempAction("runs:\n  using: 'node24'\n  main: x.mjs\n", readUsing)).toBe('node24');
     expect(withTempAction('runs:\n  using: node24 # pinned\n  main: x.mjs\n', readUsing)).toBe('node24');
+    // A comment or blank line at column 0 belongs to no block, so it must not
+    // end `runs:`. action-validator accepts such a file, and we used to read it
+    // as declaring no runtime at all and hard-fail on a valid action.
+    expect(withTempAction('runs:\n# note\n\n  using: node24\n  main: x.mjs\n', readUsing)).toBe('node24');
     expect(withTempAction('inputs:\n  using:\n    default: node20\n', readUsing)).toBe(null);
+    expect(withTempAction('runs:\n  main: x.mjs\nbranding:\n  using: node20\n', readUsing)).toBe(null);
   });
 
   it('rewrites runs.using and nothing else', () => {
@@ -64,6 +74,7 @@ describe('action.yml runtime', () => {
     expect(swapped).toContain('    default: node20');
     expect(swapped).toContain("  using: 'node20'");
     expect(withRuntime('name: x', 'node20')).toBe('name: x');
+    expect(withRuntime('runs:\n# note\n  using: node24\n', 'node20')).toBe('runs:\n# note\n  using: node20\n');
   });
 });
 

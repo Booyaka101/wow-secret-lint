@@ -14,7 +14,7 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { basename, join, resolve } from 'node:path';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
@@ -25,6 +25,11 @@ const SCHEMA_KNOWN_RUNTIME = 'node20';
 
 const CLI = createRequire(import.meta.url).resolve('@action-validator/cli/cli.mjs');
 const target = resolve(process.argv[2] ?? 'action.yml');
+
+if (!existsSync(target)) {
+  console.error(`validate-action: no such file: ${target}`);
+  process.exit(1);
+}
 
 function validate(file) {
   // action-validator picks action-vs-workflow from the FILENAME, so a copy has
@@ -62,5 +67,7 @@ if (swapped.ok) {
 }
 
 console.error(`validate-action: ${basename(target)} failed validation.\n`);
-console.error(direct.output.trim());
+// The probe's errors, not the direct run's: the direct run still leads with
+// the stale runs.using complaint, which is the noise this wrapper drops.
+console.error(swapped.output.trim());
 process.exit(1);

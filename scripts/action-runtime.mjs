@@ -32,6 +32,9 @@ function findUsing(text) {
   const lines = text.split(/\r?\n/);
   let inRuns = false;
   for (let i = 0; i < lines.length; i++) {
+    // A blank or comment line belongs to no block, so it must not close one.
+    // A comment at column 0 between `runs:` and `using:` is legal YAML.
+    if (/^\s*(#.*)?$/.test(lines[i])) continue;
     if (/^\S/.test(lines[i])) {
       inRuns = /^runs:\s*(#.*)?$/.test(lines[i]);
       continue;
