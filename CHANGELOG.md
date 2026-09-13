@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.7.0 - 2026-09-13
+
+A runtime change with no change to any finding. GitHub removes Node 20 from the
+Actions runners on **2026-09-23**, and the
+`ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` opt-out expires the same day. An
+`action.yml` still declaring `node20` does not launch after that: the runner
+cannot find the interpreter, so a consumer's
+`- uses: Booyaka101/wow-secret-lint@v1` step fails before the linter runs, with
+no fallback.
+
+### Changed
+
+- **`action.yml` declares `runs.using: node24`.** `action/index.mjs` and every
+  rule are untouched. The action entry was driven end to end against
+  `test/fixtures/worked-example-1215` under both Node 20.20.2 and Node 24.21.0:
+  the annotations, the job summary and the `errors` / `warnings` outputs hash
+  identically under each, 3 errors and 0 warnings either way. The full suite
+  passes on both. This applies to the Action; the CLI still runs on Node 20 or
+  newer, and `engines` is unchanged.
+
+### Fixed
+
+- **`action.yml` declared its outputs with composite-action syntax.** Both
+  `errors` and `warnings` carried `value: ${{ steps.lint.outputs.<name> }}`,
+  referencing a step id that does not exist in a JavaScript action. A JS action
+  sets outputs by appending to `GITHUB_OUTPUT`, which `action/index.mjs` has
+  always done, so the keys were dead weight rather than broken behaviour. They
+  are gone, and `action.yml` now validates against the Actions metadata schema
+  for the first time.
+
+- **The reported version was hand-maintained in two places.** `src/index.mjs`
+  hard-coded `VERSION` and the CLI test restated the same literal, so the two
+  agreed with each other while neither was tied to `package.json`. This release
+  is where that came due: the bump left `--version`, `tool.driver.version` in
+  SARIF and `version` in `--format=json` all saying 1.6.0, and the suite stayed
+  green because the test asserted the stale value. Caught by installing the
+  packed tarball into a clean directory and running `--version`, not by the
+  tests. The constant now carries the release and the test reads `package.json`
+  rather than repeating a string.
+
+### Added
+
+- **`npm run validate:action`**, and an `action-validate` CI job running it.
+  Nothing checked `action.yml` against a schema before, which is why the `value:`
+  keys above sat there unnoticed through six releases.
+
+  `@action-validator/core` last published 0.6.0 on **2024-02-23** and compiles
+  its schema into a wasm blob, so the `runs.using` enum it carries is `node12` /
+  `node16` / `node20` and there is no newer copy to point it at. Rather than
+  skipping the check, `scripts/validate-action.mjs` narrows it: if the validator
+  fails, it re-validates the same file with `using` swapped for one the schema
+  accepts, and passes only when that clears every error. Any other error, at any
+  path, still fails, which a test proves by planting an unrelated schema
+  violation and asserting a non-zero exit.
+
+- **Ten runtime checks** (`test/action-runtime.test.mjs`, 249 -> 259). They
+  fail when `runs.using` names a runtime that is gone, or one within 180 days of
+  its removal date. Setting `action.yml` back to `node20` turns the suite red
+  today. The next runtime deadline arrives as a failing test rather than as a
+  broken workflow. One of them re-plants the `value:` keys and asserts the
+  validator rejects them.
+
+- **README: runner requirements.** Node 24 needs macOS >= 13.5, and Node.js
+  publishes no `linux-armv7l` build for 24, so ARM32 self-hosted runners cannot
+  run the Action. Both are stated rather than glossed.
+
+### Internal
+
+- Workflows moved from `actions/checkout@v4` and `actions/setup-node@v4` to
+  `@v5`. The v4 majors are themselves `node20` actions, so our own CI would have
+  died on 2026-09-23 alongside everyone else's. The test matrix gained Node 24.
+
 ## 1.6.0 - 2026-09-07
 
 The four things 1.5.0 left on the table. No rule changes; the 12.0 and 12.1 baselines and

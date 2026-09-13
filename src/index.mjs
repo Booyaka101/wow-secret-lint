@@ -14,7 +14,7 @@ export { format, formatStylish, formatJson, formatGithub, FORMATS } from './repo
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 export { buildBaseline, applyBaseline, applyBaselineFile, readBaseline, writeBaseline } from './baseline.mjs';
 
-export const VERSION = '1.6.0';
+export const VERSION = '1.7.0';
 
 /**
  * Lint an addon directory or a single .lua/.toc file.

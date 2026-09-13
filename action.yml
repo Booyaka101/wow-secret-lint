@@ -30,11 +30,9 @@ inputs:
 outputs:
   errors:
     description: 'Number of error-severity findings.'
-    value: ${{ steps.lint.outputs.errors }}
   warnings:
     description: 'Number of warning-severity findings.'
-    value: ${{ steps.lint.outputs.warnings }}
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'action/index.mjs'

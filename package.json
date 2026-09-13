@@ -1,6 +1,6 @@
 {
   "name": "wow-secret-lint",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Maps where a WoW retail addon touches Blizzard's secret-value API, and gates CI on the one error that is certain.",
   "type": "module",
   "license": "MIT",
@@ -45,12 +45,14 @@
   "scripts": {
     "test": "vitest run",
     "lint:self": "node bin/wow-secret-lint.mjs test/fixtures/clean",
-    "action": "node action/index.mjs"
+    "action": "node action/index.mjs",
+    "validate:action": "node scripts/validate-action.mjs"
   },
   "dependencies": {
     "luaparse": "^0.3.1"
   },
   "devDependencies": {
+    "@action-validator/cli": "^0.6.0",
     "vitest": "^2.1.9"
   }
 }
