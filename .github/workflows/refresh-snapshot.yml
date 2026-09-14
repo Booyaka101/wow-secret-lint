@@ -23,10 +23,12 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      # The mirror tags a new patch before it moves `live`, so this is a no-op until the
-      # branch catches up. Dispatch it with the tag (e.g. 12.1.5) to pick a patch up early.
+      # The mirror tags a new patch before it moves `live`, so dispatch this with the tag
+      # (e.g. 12.1.5) to pick a patch up early. Until `live` catches up, its own builds keep
+      # documenting the older surface; guard-refresh.mjs drops those rather than walk the
+      # vendored snapshot backwards a patch.
       - run: node bin/wow-secret-lint.mjs --refresh --refresh-ref=${{ inputs.ref || 'live' }}
-      - run: node scripts/skip-if-unchanged.mjs
+      - run: node scripts/guard-refresh.mjs
       - run: npm test
       - uses: peter-evans/create-pull-request@v7
         with:
