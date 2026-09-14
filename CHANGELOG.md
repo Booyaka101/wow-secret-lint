@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The weekly snapshot refresh walked the vendored snapshot backwards a patch.**
+  `data/api-snapshot.json` is vendored from the `12.1.5` tag, because the mirror
+  tags a patch before it moves `live` onto it. On 2026-09-14 the scheduled run
+  rebuilt from `live`, which was still shipping 12.1.0 hotfixes and had reached
+  build 69814, newer than the 12.1.5 tag's 69594. The content genuinely differed,
+  so the old `skip-if-unchanged.mjs` guard kept it, the 12.1.5 surface vanished
+  and 23 tests went red. The guard is now `scripts/guard-refresh.mjs` and
+  compares the patch as well: a refresh on an older patch than the vendored one
+  is reverted, and so is one that could not read the mirror's build stamp at all.
+  Nothing in the published package changed.
+
 ## 1.7.0 - 2026-09-13
 
 A runtime change with no change to any finding. GitHub removes Node 20 from the
