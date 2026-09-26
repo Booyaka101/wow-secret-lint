@@ -102,7 +102,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else if (reason === 'older-build') {
     console.log(`refresh is ${patch} build ${build ?? 'unknown'}, behind the vendored build ${committedBuild}; reverting`);
   } else if (reason === 'unchanged') {
-    console.log('snapshot content unchanged (only the generated timestamp differs); reverting');
+    console.log('snapshot API content unchanged; reverting');
   } else {
     console.log(`snapshot content changed at patch ${patch ?? 'unknown'}; leaving the refresh in place`);
   }
