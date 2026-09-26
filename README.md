@@ -2,7 +2,7 @@
 
 Static analysis for World of Warcraft **retail** addons. It maps where your Lua touches Blizzard's secret-value API, and hard-fails your build on the things Blizzard documents as certain to break.
 
-Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seventeen unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. Patch 12.1.5 (build 69594, live 2026-09-03) [added two more forbidden aspects and closed the cooldown APIs](https://warcraft.wiki.gg/wiki/Patch_12.1.5/API_changes). When tainted code does something disallowed, the wiki is blunt about the result:
+Patch 12.0 introduced [secret values](https://warcraft.wiki.gg/wiki/Secret_Values). A lot of the API now hands your addon a value you are allowed to store, pass around and print, but not to do arithmetic on, compare, index, call, or measure with `#`. Patch 12.1 (Curse of Ula'tek, live 2026-08-11) [widened that surface enormously](https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes): every `UnitAura` API returns full secrets or nil while auras are secret, seventeen unit identity APIs joined them, and the new AuraButton/AuraContainer frames carry forbidden aspects. Patch 12.1.5 [added two more forbidden aspects and closed the cooldown APIs](https://warcraft.wiki.gg/wiki/Patch_12.1.5/API_changes), and its build 69952 let secret text into most of `C_Intl`. When tainted code does something disallowed, the wiki is blunt about the result:
 
 > When an operation that is not allowed is performed, the result will be an **immediate** Lua error.
 
@@ -237,6 +237,7 @@ Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` pr
 | WSL019 | error | 12.1.5: querying the progress or running state of an animation that carries `QueryAnimationProgress` |
 | WSL020 | error | 12.1.5: adding or reparenting an animation on a group that carries `AddAnimations` |
 | WSL021 | error | 12.1.5: `SetCooldown`/`Clear` on a cooldown frame Blizzard protects |
+| WSL022 | warning | 12.1.5: secret text passed to `C_Intl.Transliterate` with a `Null` or `Remove` transliterator |
 
 WSL008 comes from the [12.0.0 API changes](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes): *"COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them."* Use `COMBAT_LOG_EVENT_INTERNAL_UNFILTERED` or the `C_CombatLog` namespace.
 
@@ -296,6 +297,16 @@ local cd = _G["ActionButton1Cooldown"]
 cd:SetCooldown(GetTime(), 10)   -- WSL021
 cd:IsPaused()                   -- silent, reading is not a protected function
 ```
+
+**WSL022** is the one 12.1.5 rule that stays a warning, even under `--strict`. Build 69952 let secret text into `C_Intl.Transliterate` but attached a precondition, `TransliteratorAllowed`: *"Prevents Remove and Null transliterators when used with secret text arguments."* Its `FailureMode` is `ReturnNothing`, so a refused call does not error. It returns nothing and your label goes blank. The rule reads the second argument as an ICU transliterator ID when it is a string literal or a local holding one, and fires when any segment of it targets `Null` or `Remove`: `Any-Null`, `any-remove`, `[:Mn:] Remove`, or a compound ID like the accent stripper below. An ID built at runtime is left alone, since there is nothing to read.
+
+```lua
+local name = UnitSpellTargetName("target")
+C_Intl.Transliterate(name, "Any-Latin")                              -- fine
+C_Intl.Transliterate(name, "NFD; [:Nonspacing Mark:] Remove; NFC")   -- WSL022
+```
+
+The same build added two forbidden aspects with no rule behind them: `SetTexture` (checked by `ClearSVG`, `SetColorTexture` and `SetSVG`) and `QueryRotation` (checked by `GetRotation`), all on `SimpleTextureBaseAPI`. The snapshot carries them, but nothing Blizzard publishes says which textures carry those aspects, and guessing would flag every addon that colours its own texture. When that is documented, a rule can read the method list out of the snapshot the way WSL019 and WSL020 do.
 
 ### What it will never flag
 
@@ -361,13 +372,13 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 
 | Mode | Errors | Warnings | Addons that would fail CI |
 | --- | --- | --- | --- |
-| `--patch=12.1.5` (default) | 379 | 121 | 9 of 12 |
-| `--patch=12.1` | 379 | 121 | 9 of 12 |
-| `--patch=12.1 --strict` | 489 | 11 | 9 of 12 |
-| `--patch=12.0` | 20 | 90 | 3 of 12 |
-| `--patch=12.0 --strict` | 110 | 0 | 5 of 12 |
+| `--patch=12.1.5` (default) | 379 | 126 | 9 of 12 |
+| `--patch=12.1` | 379 | 126 | 9 of 12 |
+| `--patch=12.1 --strict` | 490 | 15 | 9 of 12 |
+| `--patch=12.0` | 20 | 95 | 3 of 12 |
+| `--patch=12.0 --strict` | 111 | 4 | 5 of 12 |
 
-The two `12.0` rows are identical to what v1.2.0 reported, and the `12.1` rows to what v1.4.2 reported, which is the point of the flag. Everything above them is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
+`--patch` pins the rules, not the documentation they read. On the 1.7.0 snapshot the two `12.0` rows were identical to what v1.2.0 reported and the `12.1` rows to what v1.4.2 reported. Build 69952 then added `SecretReturns = true` to `GetArenaOpponentSpec`, and that one change is the whole difference in every row: four new WSL009 warnings in oUF's arena preparation code and its copies in KkthnxUI and SpartanUI, plus a `specID > 0` comparison in SpartanUI's `oUF_PVPSpecIcons.lua`. Nothing went away, and the `C_Intl` change moved no number, because no addon here passes a secret into `C_Intl`. Everything above the `12.0` rows is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
 
 | Rule | Count | Where |
 | --- | --- | --- |
@@ -377,11 +388,11 @@ The two `12.0` rows are identical to what v1.2.0 reported, and the `12.1` rows t
 | WSL014 | 10 | mostly `GetInventorySlotInfo`, plus `GetInspectSpecialization`, `GetWeaponEnchantInfo` and SpartanUI's `UIParentLoadAddOn` |
 | WSL016 | 3 | oUF `privateauras.lua:133` and both copies vendored into KkthnxUI and SpartanUI |
 | WSL017 | 0 | no addon in the corpus uses AuraContainers yet; exercised by fixtures |
-| WSL019, WSL020, WSL021 | 0 | see below |
+| WSL019-WSL022 | 0 | see below |
 
 Two numbers are worth reading together. **DBM and BigWigs report no WSL012 at all**, because both already wrap every aura lookup in an `issecretvalue` guard and the analysis credits that idiom. **BigWigs still has four WSL018 findings**, because guarding the result does not help when the call itself is what errors. That pair is the honest summary of where the ecosystem is: the careful addons did the guard work, and the guard work is not enough.
 
-The three 12.1.5 rules report **nothing** on this corpus, and nothing on a second pass on 2026-09-07 over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own interface code: 4,218 more files, zero findings. Cross-file widget typing and metatable-hook awareness, both added in 1.6.0, changed no number in either pass. Four days after the patch, no addon in reach has adopted the Pandemic animation APIs, and none of them drives Blizzard's action-button cooldowns in a way a static reader can see. OmniCC gets closest and is the honest limit of the rule: it hooks `SetCooldown` on `getmetatable(ActionButton1Cooldown).__index` and dispatches through a proxy with the method name as a string, so the frame is never named at the call site. WSL021 sees a protected cooldown only where the file names one.
+The 12.1.5 rules report **nothing** on this corpus (WSL022 measured on 2026-09-26, the rest on 2026-09-07), and nothing on a second pass on 2026-09-07 over each addon's current HEAD plus OmniCC, Dominos and Blizzard's own interface code: 4,218 more files, zero findings. Cross-file widget typing and metatable-hook awareness, both added in 1.6.0, changed no number in either pass. Four days after the patch, no addon in reach has adopted the Pandemic animation APIs, and none of them drives Blizzard's action-button cooldowns in a way a static reader can see. OmniCC gets closest and is the honest limit of the rule: it hooks `SetCooldown` on `getmetatable(ActionButton1Cooldown).__index` and dispatches through a proxy with the method name as a string, so the frame is never named at the call site. WSL021 sees a protected cooldown only where the file names one.
 
 A sample of the WSL012/WSL013 findings across every affected repo was read against its source by hand; each one performs an operation the 12.1 notes document as disallowed, on a value those notes document as secret, with no guard in scope. The pre-12.1 findings are unchanged from v1.2.0, where all 110 strict findings were read by hand.
 
@@ -431,28 +442,32 @@ Settling it needs someone to run a flagged line in game and watch what happens, 
 
 ## Where the data comes from
 
-`data/api-snapshot.json` is built from Blizzard's generated API documentation, mirrored at [Gethe/wow-ui-source](https://github.com/Gethe/wow-ui-source). The current snapshot is patch **12.1.5, build 69594**, rebuilt from that mirror's `12.1.5` tag, and carries **10,250 documented functions and 760 structures**: 20 with `SecretReturns = true`, 314 conditionally secret, and per-field `NeverSecret` markers on 20 structures. It also carries the widget markers the 12.1.5 rules read: `ChecksForbiddenAspects` and `IsProtectedFunction`, keyed by widget system because method names collide across widget types.
+`data/api-snapshot.json` is built from Blizzard's generated API documentation, mirrored at [Gethe/wow-ui-source](https://github.com/Gethe/wow-ui-source). The current snapshot is patch **12.1.5, build 69952**, rebuilt from that mirror's `12.1.5` tag, and carries **10,242 documented functions and 760 structures**: 21 with `SecretReturns = true`, 316 conditionally secret, and per-field `NeverSecret` markers on 20 structures. It also carries the widget markers the 12.1.5 rules read, `ChecksForbiddenAspects` and `IsProtectedFunction`, keyed by widget system because method names collide across widget types, and the preconditions Blizzard documents under `Predicates`, which is where WSL022 finds `TransliteratorAllowed`.
 
-This is the half of the release with no new rules in it and it still changes results. WSL006 and WSL007 consult the snapshot before they fire, so an addon that has already adopted a 12.1.5 API was being analysed against a documentation set that had never heard of the symbol:
+A snapshot refresh with no new rule in it still changes results, because WSL006 and WSL007 consult the snapshot before they fire. 1.7.0 shipped the first 12.1.5 PTR build, 69594, where every `C_Intl` function said `SecretArguments = "AllowedWhenUntainted"`. Build 69952 moved 25 of them to `AllowedWhenTainted`, so an addon that upper-cases a secret name was being failed for something the client allows. Run against the 1.7.0 snapshot, then the current one:
 
 ```
-$ npx wow-secret-lint --strict --snapshot=./api-snapshot-1.4.2.json Adopter.lua
-0 errors, 0 warnings
-
-$ npx wow-secret-lint --strict Adopter.lua
+$ npx wow-secret-lint --strict --snapshot=./api-snapshot-1.7.0.json Adopter.lua
 Adopter.lua:2:24  error  WSL006  secret value passed to math.clamp(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: 'hp' derives from UnitHealth() (SecretReturns=true)
 Adopter.lua:3:29  error  WSL006  secret value passed to C_Intl.ToUpper(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)
 Adopter.lua:4:22  error  WSL006  secret value passed to string.startswith(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)
 3 errors, 0 warnings
+
+$ npx wow-secret-lint --strict Adopter.lua
+Adopter.lua:2:24  error  WSL006  secret value passed to math.clamp(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: 'hp' derives from UnitHealth() (SecretReturns=true)
+Adopter.lua:4:22  error  WSL006  secret value passed to string.startswith(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)
+2 errors, 0 warnings
 ```
 
-The refresh also picked up a new conditional marker with no code change needed: `table.count`, `table.getcountinfo` and `table.isempty` carry `SecretWhenLuaTableHasSecretKeys`, so `--conditional=warn` reports them like any other `SecretWhen*` API.
+Not all of `C_Intl` moved. `C_Intl.CreateLocaleContext` still says `AllowedWhenUntainted`, so a secret passed to it is still WSL006. `C_LocaleContext` is gone as a namespace: its functions are now methods on the object `CreateLocaleContext` returns. Both files are in `test/fixtures/worked-example-intl/`.
+
+The 12.1.5 refresh also picked up a new conditional marker with no code change needed: `table.count`, `table.getcountinfo` and `table.isempty` carry `SecretWhenLuaTableHasSecretKeys`, so `--conditional=warn` reports them like any other `SecretWhen*` API.
 
 Every count on this page comes out of the snapshot itself:
 
 ```bash
 node -p "const s=require('./data/api-snapshot.json'); [s.patch, s.build, s.functionCount, s.structureCount, s.secretReturnCount, s.conditionalCount, s.annotatedStructureCount].join(' ')"
-12.1.5 69594 10250 760 20 314 20
+12.1.5 69952 10242 760 21 316 20
 ```
 
 It is parsed with `luaparse`, not regexed, so nested tables and multi-line entries cannot skew it. Rebuild it any time:
@@ -461,24 +476,23 @@ It is parsed with `luaparse`, not regexed, so nested tables and multi-line entri
 npx wow-secret-lint --refresh
 ```
 
-A scheduled workflow in this repo does that weekly and opens a pull request when the docs move.
-
 The mirror tags a client build before it moves its `live` branch, which is how 12.1.5 was picked up here on the day it shipped:
 
 ```bash
 npx wow-secret-lint --refresh --refresh-ref=12.1.5
 ```
 
+It also moves a patch tag forward across PTR builds. `12.1.5` pointed at build 69594 on 2026-09-03 and at 69952 on 2026-09-22, which is how the `C_Intl` change arrived. So the weekly workflow in this repo rebuilds from the vendored snapshot's own patch tag first, then from `live`. It keeps a rebuild only when it is a later patch, or a later build of the same patch, and its content differs. A pull request opens only when a rebuild was kept.
+
 The snapshot records the patch and build it came from, read off the mirror's own commit message, and `--refresh` will not walk it backwards onto an older build without `--force`. Point it at a stale ref and it says so and leaves the file alone:
 
 ```
 $ npx wow-secret-lint --refresh --refresh-ref=12.1.0
 rebuilding API snapshot from Gethe/wow-ui-source@12.1.0 ...
-wow-secret-lint: @12.1.0 is still 12.1.0 (build 69587), older than the vendored 12.1.5
-(build 69594); left the snapshot alone. Pass --force to write it anyway.
+wow-secret-lint: @12.1.0 is still 12.1.0 (build 69933), older than the vendored 12.1.5 (build 69952); left the snapshot alone. Pass --force to write it anyway.
 ```
 
-The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot: Blizzard's generated documentation carries no marker for it, only the patch notes describe it, so the WSL012/WSL013 API lists live in `src/rules.mjs` with the source quoted, and `--patch` gates them. The 12.1.5 rules are the other way round. Blizzard does mark those in the generated docs, so WSL019 and WSL020 read their method lists out of the snapshot and WSL021 reads the six `IsProtectedFunction` cooldown methods out of it; only the question of *which objects* carry the aspects lives in `src/rules.mjs`. There is one snapshot, and `--snapshot`/`--refresh` behave the same under every patch.
+The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot: Blizzard's generated documentation carries no marker for it, only the patch notes describe it, so the WSL012/WSL013 API lists live in `src/rules.mjs` with the source quoted, and `--patch` gates them. The 12.1.5 rules are the other way round. Blizzard does mark those in the generated docs, so WSL019 and WSL020 read their method lists out of the snapshot, WSL021 reads the six `IsProtectedFunction` cooldown methods out of it, and WSL022 reads the precondition off `C_Intl.Transliterate`; only the question of *which objects* carry the aspects lives in `src/rules.mjs`. There is one snapshot, and `--snapshot`/`--refresh` behave the same under every patch.
 
 ## Limitations and non-goals
 
@@ -499,7 +513,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-259 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
+289 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), the `C_Intl` worked example (`test/fixtures/worked-example-intl/`), the refresh guard run against throwaway git repos, recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

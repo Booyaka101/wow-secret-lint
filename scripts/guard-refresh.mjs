@@ -8,13 +8,15 @@
 //    single week forever.
 // 2. The mirror tags a patch before it moves `live` onto it, so the vendored snapshot can
 //    sit ahead of `live`. Refreshing from `live` then replaces a newer documented surface
-//    with an older one, which is a downgrade however new the client build stamp is.
+//    with an older one, which is a downgrade however new the client build stamp is. The
+//    same goes for an earlier build of the same patch.
 //
 // Either way it reverts the working tree, so create-pull-request sees a clean diff and
 // correctly opens nothing.
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, copyFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** Drop fields that change on every run regardless of whether the API data did. */
@@ -46,34 +48,59 @@ export function comparePatch(a, b) {
   return 0;
 }
 
-/** Revert `path` (relative to `cwd`) unless the refresh is both newer and functionally different. */
-export function guardRefresh(path, cwd = process.cwd()) {
-  const committed = JSON.parse(execSync(`git show HEAD:${path}`, { encoding: 'utf8', cwd, maxBuffer: 1 << 28 }));
-  const current = JSON.parse(readFileSync(`${cwd}/${path}`, 'utf8'));
-  const result = { patch: current.patch ?? null, committedPatch: committed.patch ?? null };
+/** A build stamp to order by; a missing one sorts below every real build. */
+const buildOf = (snapshot) => (Number.isFinite(snapshot.build) ? snapshot.build : -Infinity);
+
+/**
+ * Revert `path` (relative to `cwd`) unless the refresh is both newer and functionally different.
+ * It is judged against the committed file, or against `against`, a copy taken just before this
+ * refresh, which lets a second refresh in the same run build on a first one that was kept.
+ */
+export function guardRefresh(path, cwd = process.cwd(), against = null) {
+  const baseline = against
+    ? readFileSync(resolve(cwd, against), 'utf8')
+    : execSync(`git show HEAD:${path}`, { encoding: 'utf8', cwd, maxBuffer: 1 << 28 });
+  const committed = JSON.parse(baseline);
+  const current = JSON.parse(readFileSync(resolve(cwd, path), 'utf8'));
+  const result = {
+    patch: current.patch ?? null,
+    build: current.build ?? null,
+    committedPatch: committed.patch ?? null,
+    committedBuild: committed.build ?? null,
+  };
+  const revert = (reason) => {
+    if (against) copyFileSync(resolve(cwd, against), resolve(cwd, path));
+    else execSync(`git checkout -- ${path}`, { cwd });
+    return { ...result, reverted: true, reason };
+  };
 
   // Checked before sameContent: a downgrade to a build that happens to document an identical
   // surface is still a downgrade, and both answers are "revert" anyway.
-  if (comparePatch(current.patch, committed.patch) < 0) {
-    execSync(`git checkout -- ${path}`, { cwd });
-    return { ...result, reverted: true, reason: 'older-patch' };
-  }
-  if (sameContent(committed, current)) {
-    execSync(`git checkout -- ${path}`, { cwd });
-    return { ...result, reverted: true, reason: 'unchanged' };
-  }
+  const byPatch = comparePatch(current.patch, committed.patch);
+  if (byPatch < 0) return revert('older-patch');
+  if (byPatch === 0 && buildOf(current) < buildOf(committed)) return revert('older-build');
+  if (sameContent(committed, current)) return revert('unchanged');
   return { ...result, reverted: false, reason: null };
 }
 
-// CLI entry point. `scripts/guard-refresh.mjs [path]`, defaulting to the real snapshot.
+// CLI entry point. `scripts/guard-refresh.mjs [path] [--against=<copy>]`, defaulting to the
+// real snapshot judged against HEAD.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const path = process.argv[2] ?? 'data/api-snapshot.json';
-  const { reason, patch, committedPatch } = guardRefresh(path);
+  const args = process.argv.slice(2);
+  const path = args.find((a) => !a.startsWith('--')) ?? 'data/api-snapshot.json';
+  const against = args.find((a) => a.startsWith('--against='));
+  const { reason, patch, build, committedPatch, committedBuild } = guardRefresh(
+    path,
+    process.cwd(),
+    against ? against.slice('--against='.length) : null
+  );
   if (reason === 'older-patch') {
     console.log(
       `refresh is patch ${patch ?? 'unknown'}, behind the vendored ${committedPatch}; ` +
         'reverting until the ref catches up'
     );
+  } else if (reason === 'older-build') {
+    console.log(`refresh is ${patch} build ${build ?? 'unknown'}, behind the vendored build ${committedBuild}; reverting`);
   } else if (reason === 'unchanged') {
     console.log('snapshot content unchanged (only the generated timestamp differs); reverting');
   } else {

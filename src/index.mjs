@@ -1,5 +1,6 @@
 // Public API and the lint driver that ties .toc discovery, analysis and reporting together.
 
+import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource, analyzeXml } from './analyze.mjs';
@@ -14,7 +15,7 @@ export { format, formatStylish, formatJson, formatGithub, FORMATS } from './repo
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
 export { buildBaseline, applyBaseline, applyBaselineFile, readBaseline, writeBaseline } from './baseline.mjs';
 
-export const VERSION = '1.7.0';
+export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 /**
  * Lint an addon directory or a single .lua/.toc file.

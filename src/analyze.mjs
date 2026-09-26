@@ -48,6 +48,8 @@ import {
   PROTECTED_COOLDOWN_GLOBAL,
   PROTECTED_BUTTON_GLOBAL,
   isProtectedTemplate,
+  TRANSLITERATOR_PRECONDITION,
+  refusedTransliterator,
 } from './rules.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
@@ -986,6 +988,7 @@ class Analyzer {
     const entry = callee.method ? null : this.apiEntry(name);
     if (entry) {
       if (this.patch121) this.checkRenamedStructFields(entry, args);
+      if (this.patch1215) this.checkTransliterator(entry, name, args, argTaints);
       const sa = entry.secretArguments;
       for (let i = 0; i < args.length; i++) {
         const t = argTaints[i];
@@ -1224,6 +1227,27 @@ class Analyzer {
           `${callee}(${this.pathOf(argNode) ?? ''})`
       );
     }
+  }
+
+  /**
+   * WSL022. The precondition only refuses the transliterator when the text is secret, so both
+   * halves have to be provable here: a tracked secret first argument, and an ID this file
+   * resolves to a string. Anything built at runtime is left alone.
+   */
+  checkTransliterator(entry, name, args, argTaints) {
+    if (!entry.preconditions || !entry.preconditions.includes(TRANSLITERATOR_PRECONDITION)) return;
+    const t = argTaints[0];
+    const id = this.constString(args[1]);
+    const refused = t && !t.container && id !== null ? refusedTransliterator(id) : null;
+    if (!refused) return;
+    const pre = (this.api.preconditions && this.api.preconditions[TRANSLITERATOR_PRECONDITION]) || {};
+    this.report(
+      'WSL022',
+      args[1],
+      `${name}() refuses the ${refused} transliterator ('${id}') for secret text from tainted code and returns ` +
+        `nothing (${TRANSLITERATOR_PRECONDITION}, FailureMode ${pre.failureMode ?? 'ReturnNothing'}): ${this.describe(t)}`,
+      { taint: t }
+    );
   }
 
   // ------------------------------------------------------------- patch 12.1 checks

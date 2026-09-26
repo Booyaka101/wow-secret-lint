@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeSource } from '../src/analyze.mjs';
 import { loadSnapshot } from '../src/apidata.mjs';
-import { patchAtLeast, patchForInterface, patchList, DEFAULT_PATCH, PATCHES } from '../src/rules.mjs';
+import { patchAtLeast, patchForInterface, patchList, refusedTransliterator, DEFAULT_PATCH, PATCHES, RULES } from '../src/rules.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -68,6 +68,13 @@ const VIOLATING = {
     'WSL021@12', // and its charge cooldown, through _G
     'WSL021@15', // a Cooldown the addon built from a secure template
   ],
+  'wsl022-violating.lua': [
+    'WSL022@4', // Any-Null
+    'WSL022@5', // Remove inside a compound ID, behind a [set] filter
+    'WSL022@6', // Remove behind a nested [set] filter
+    'WSL022@9', // the ID held in a local constant
+    'WSL022@10', // Null with a variant, second in the chain
+  ],
 };
 
 describe('12.1.5 rule fixtures', () => {
@@ -75,7 +82,8 @@ describe('12.1.5 rule fixtures', () => {
     it(`${name} produces exactly the documented findings`, async () => {
       const findings = await lintFixture(name);
       expect(findings.map((f) => `${f.ruleId}@${f.line}`)).toEqual(expected);
-      expect(new Set(findings.map((f) => f.severity))).toEqual(new Set(['error']));
+      const rule = expected[0].split('@')[0];
+      expect(new Set(findings.map((f) => f.severity))).toEqual(new Set([RULES[rule].severity]));
     });
 
     for (const patch of ['12.0', '12.1']) {
@@ -104,6 +112,82 @@ describe('12.1.5 rule fixtures', () => {
       expect(f.message).toMatch(f.ruleId === 'WSL019' ? /QueryAnimationProgress/ : /AddAnimations/);
       expect(f.message).toMatch(/forbidden aspect/);
     }
+  });
+});
+
+describe('WSL022, C_Intl.Transliterate', () => {
+  it('quotes the precondition and its failure mode', async () => {
+    const [first] = await lintFixture('wsl022-violating.lua');
+    expect(first.severity).toBe('warning');
+    expect(first.message).toContain("refuses the Null transliterator ('Any-Null')");
+    expect(first.message).toContain('TransliteratorAllowed, FailureMode ReturnNothing');
+    expect(first.column).toBe(42);
+  });
+
+  it('stays a warning under --strict, because the call returns nothing rather than erroring', async () => {
+    const findings = await lintFixture('wsl022-violating.lua', { strict: true });
+    expect(new Set(findings.map((f) => f.severity))).toEqual(new Set(['warning']));
+  });
+
+  it('reads Null and Remove out of any shape of ICU ID', () => {
+    expect(refusedTransliterator('Any-Null')).toBe('Null');
+    expect(refusedTransliterator('any-remove')).toBe('Remove');
+    expect(refusedTransliterator('Null')).toBe('Null');
+    expect(refusedTransliterator('[:Mn:] Remove')).toBe('Remove');
+    expect(refusedTransliterator('[[:Mn:][:Me:]] Remove')).toBe('Remove');
+    expect(refusedTransliterator('[\\]] Remove')).toBe('Remove');
+    expect(refusedTransliterator('NFD; [:Nonspacing Mark:] Remove; NFC')).toBe('Remove');
+    expect(refusedTransliterator('Latin-ASCII; Any-Null/Variant')).toBe('Null');
+    expect(refusedTransliterator('Any-Remove (Any-Latin)')).toBe('Remove');
+  });
+
+  it('lets every other ID through, including ones that merely mention the words', () => {
+    expect(refusedTransliterator('Any-Latin')).toBeNull();
+    expect(refusedTransliterator('NFD; Latin-ASCII; NFC')).toBeNull();
+    expect(refusedTransliterator('Any-Latin (Any-Remove)')).toBeNull();
+    expect(refusedTransliterator('[:Remove:] Any-Latin')).toBeNull();
+    expect(refusedTransliterator('Null-Latin')).toBeNull();
+    expect(refusedTransliterator('')).toBeNull();
+  });
+
+  it('is silent when the ID is not a literal', () => {
+    expect(ids("local n = UnitSpellTargetName('target')\nC_Intl.Transliterate(n, GetID())\n")).toEqual([]);
+  });
+});
+
+describe('C_Intl at 12.1.5 build 69952', () => {
+  const ADDON = join('test', 'fixtures', 'worked-example-intl');
+
+  it('reproduces the README worked example byte for byte', async () => {
+    const r = await run(['--strict', 'Adopter.lua'], join(ROOT, ADDON));
+    expect(r.stdout).toBe(
+      [
+        "Adopter.lua:2:24  error  WSL006  secret value passed to math.clamp(), which is documented SecretArguments = \"AllowedWhenUntainted\" and addon code is always tainted: 'hp' derives from UnitHealth() (SecretReturns=true)",
+        'Adopter.lua:4:22  error  WSL006  secret value passed to string.startswith(), which is documented SecretArguments = "AllowedWhenUntainted" and addon code is always tainted: derives from UnitSpellTargetName() (SecretReturns=true)',
+        '2 errors, 0 warnings',
+        '',
+      ].join('\n')
+    );
+    expect(r.code).toBe(1);
+  });
+
+  it('no longer flags C_Intl.ToUpper, and still flags C_Intl.CreateLocaleContext', async () => {
+    const source = await readFile(join(ROOT, ADDON, 'Locale.lua'), 'utf8');
+    const { findings } = analyzeSource(source, 'Locale.lua', api, { strict: true });
+    expect(findings.map((f) => `${f.ruleId}@${f.line}`)).toEqual(['WSL006@3']);
+    expect(findings[0].message).toContain('C_Intl.CreateLocaleContext()');
+  });
+
+  it('picks the 12.1.5 surface with --patch=auto on its 120105 .toc', async () => {
+    const r = await run(['--strict', '--patch=auto', '--format=json', ADDON]);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.patch).toBe('12.1.5');
+    expect(parsed.findings.map((f) => `${f.file.split('/').pop()}:${f.line}`)).toEqual([
+      'Adopter.lua:2',
+      'Adopter.lua:4',
+      'Locale.lua:3',
+    ]);
+    expect(r.code).toBe(1);
   });
 });
 

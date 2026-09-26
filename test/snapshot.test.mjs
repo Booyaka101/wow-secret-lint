@@ -202,6 +202,94 @@ describe('12.1.5 widget markers', () => {
   });
 });
 
+// The shape of IntlDocumentation.lua at 12.1.5 build 69952, cut down. A function names its
+// precondition with `Name = true`; the definition may sit in another file entirely.
+const INTL_DOC = `
+local Intl =
+{
+	Name = "Intl",
+	Type = "System",
+	Namespace = "C_Intl",
+
+	Functions =
+	{
+		{
+			Name = "Transliterate",
+			Type = "Function",
+			MayReturnNothing = true,
+			TransliteratorAllowed = true,
+			SecretArguments = "AllowedWhenTainted",
+
+			Arguments =
+			{
+				{ Name = "text", Type = "cstring", Nilable = false },
+				{ Name = "transliteratorID", Type = "cstring", Nilable = false },
+			},
+		},
+		{
+			Name = "ToUpper",
+			Type = "Function",
+			SecretArguments = "AllowedWhenTainted",
+		},
+	},
+};
+
+APIDocumentation:AddDocumentationTable(Intl);
+`;
+
+const PREDICATES_DOC = `
+local IntlPredicates =
+{
+	Name = "IntlPredicates",
+	Type = "System",
+
+	Predicates =
+	{
+		{
+			Name = "TransliteratorAllowed",
+			Type = "Precondition",
+			FailureMode = "ReturnNothing",
+			Documentation = { "Prevents Remove and Null transliterators when used with secret text arguments." },
+		},
+		{
+			Name = "SecretWhenSomething",
+			Type = "Secret",
+		},
+	},
+};
+
+APIDocumentation:AddDocumentationTable(IntlPredicates);
+`;
+
+describe('preconditions', () => {
+  it('reads Precondition predicates and skips the other predicate types', () => {
+    const { preconditions } = extractFile(PREDICATES_DOC, 'IntlPredicatesDocumentation.lua');
+    expect(preconditions).toEqual([
+      {
+        name: 'TransliteratorAllowed',
+        failureMode: 'ReturnNothing',
+        documentation: 'Prevents Remove and Null transliterators when used with secret text arguments.',
+      },
+    ]);
+  });
+
+  it('matches a function to a precondition defined in another file', () => {
+    const index = buildIndex([
+      extractFile(INTL_DOC, 'IntlDocumentation.lua'),
+      extractFile(PREDICATES_DOC, 'IntlPredicatesDocumentation.lua'),
+    ]);
+    expect(index.functions['C_Intl.Transliterate'].preconditions).toEqual(['TransliteratorAllowed']);
+    expect(index.functions['C_Intl.Transliterate'].secretArguments).toBe('AllowedWhenTainted');
+    expect(index.functions['C_Intl.ToUpper'].preconditions).toBeUndefined();
+    expect(index.preconditions.TransliteratorAllowed.failureMode).toBe('ReturnNothing');
+  });
+
+  it('ignores a true flag that names no precondition', () => {
+    const index = buildIndex([extractFile(INTL_DOC, 'IntlDocumentation.lua')]);
+    expect(index.functions['C_Intl.Transliterate'].preconditions).toBeUndefined();
+  });
+});
+
 describe('vendored snapshot', () => {
   it('is real Blizzard data with UnitHealth.secretReturns === true', async () => {
     const api = await loadSnapshot();
@@ -228,7 +316,7 @@ describe('vendored snapshot', () => {
   it('is the 12.1.5 documentation, with the markers the 12.1.5 rules read', async () => {
     const api = await loadSnapshot();
     expect(api.patch).toBe('12.1.5');
-    expect(api.build).toBe(69594);
+    expect(api.build).toBe(69952);
     expect(api.widgets.SimpleAnimGroupAPI.IsPlaying.aspects).toContainEqual({
       aspect: 'QueryAnimationProgress',
       argument: 'self',
@@ -241,6 +329,29 @@ describe('vendored snapshot', () => {
     for (const name of ['Clear', 'SetCooldown', 'SetCooldownDuration', 'SetCooldownFromDurationObject', 'SetCooldownFromExpirationTime', 'SetCooldownUNIX']) {
       expect(api.widgets.FrameAPICooldown[name].protected).toBe(true);
     }
+  });
+
+  // Build 69952 moved C_Intl to AllowedWhenTainted, except the calls that set a locale.
+  it('carries the build 69952 C_Intl surface and its precondition', async () => {
+    const api = await loadSnapshot();
+    expect(api.functions['C_Intl.ToUpper'].secretArguments).toBe('AllowedWhenTainted');
+    expect(api.functions['C_Intl.Transliterate'].secretArguments).toBe('AllowedWhenTainted');
+    expect(api.functions['C_Intl.CreateLocaleContext'].secretArguments).toBe('AllowedWhenUntainted');
+    expect(api.functions['C_Intl.Transliterate'].preconditions).toEqual(['TransliteratorAllowed']);
+    expect(api.preconditions.TransliteratorAllowed).toEqual({
+      failureMode: 'ReturnNothing',
+      documentation: 'Prevents Remove and Null transliterators when used with secret text arguments.',
+    });
+  });
+
+  // No rule reads these yet; the snapshot carries them so one can.
+  it('carries the texture aspects build 69952 added', async () => {
+    const api = await loadSnapshot();
+    const texture = api.widgets.SimpleTextureBaseAPI;
+    for (const name of ['ClearSVG', 'SetColorTexture', 'SetSVG']) {
+      expect(texture[name].aspects, name).toEqual([{ aspect: 'SetTexture', argument: 'self' }]);
+    }
+    expect(texture.GetRotation.aspects).toEqual([{ aspect: 'QueryRotation', argument: 'self' }]);
   });
 
   it('carries the globals patch 12.1.5 added', async () => {

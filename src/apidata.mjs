@@ -20,6 +20,10 @@
 // Those two are keyed by system in `widgets`, because the flat function table keys on name
 // alone and method names collide across widget types.
 //
+// Functions can also name a Precondition, a `Predicates` entry of Type "Precondition" that says
+// what happens when the call is refused (FailureMode Error, ReturnWithError or ReturnNothing).
+// Definitions and uses live in different files, so they are matched up in buildIndex.
+//
 // We parse the Lua rather than regexing it so nested tables and multi-line entries
 // cannot skew the result.
 
@@ -112,7 +116,7 @@ function collectSystems(value, out, seen = new Set()) {
   }
   // Most files declare `Type = "System"`, but shared-structure files (e.g. SpellShared)
   // declare a bare table holding only `Tables`.
-  if (value.Type === 'System' || Array.isArray(value.Functions) || Array.isArray(value.Tables)) {
+  if (value.Type === 'System' || Array.isArray(value.Functions) || Array.isArray(value.Tables) || Array.isArray(value.Predicates)) {
     out.push(value);
     return;
   }
@@ -189,6 +193,7 @@ export function extractFile(luaSource, fileLabel = '<memory>') {
 
   const functions = [];
   const structures = [];
+  const preconditions = [];
 
   for (const sys of systems) {
     const namespace = typeof sys.Namespace === 'string' ? sys.Namespace : null;
@@ -212,6 +217,7 @@ export function extractFile(luaSource, fileLabel = '<memory>') {
         secretReturns: f.SecretReturns === true || returns.some((r) => r.secretValue),
         conditional: conditional.length ? conditional : null,
         secretArguments: typeof f.SecretArguments === 'string' ? f.SecretArguments : null,
+        flags: Object.keys(f).filter((k) => f[k] === true),
         args,
         returns,
       });
@@ -241,9 +247,18 @@ export function extractFile(luaSource, fileLabel = '<memory>') {
       }
       structures.push({ name: t.Name, annotated, fields });
     }
+
+    for (const p of Array.isArray(sys.Predicates) ? sys.Predicates : []) {
+      if (!p || typeof p !== 'object' || typeof p.Name !== 'string' || p.Type !== 'Precondition') continue;
+      preconditions.push({
+        name: p.Name,
+        failureMode: typeof p.FailureMode === 'string' ? p.FailureMode : null,
+        documentation: Array.isArray(p.Documentation) ? p.Documentation.join(' ') : null,
+      });
+    }
   }
 
-  return { functions, structures };
+  return { functions, structures, preconditions };
 }
 
 /** Shape the per-file records into the on-disk snapshot. */
@@ -251,8 +266,13 @@ export function buildIndex(files, meta = {}) {
   const functions = {};
   const structures = {};
   const widgets = {};
+  const preconditions = {};
   let secretReturnCount = 0;
   let conditionalCount = 0;
+
+  for (const { preconditions: defs = [] } of files) {
+    for (const { name, ...rest } of defs) preconditions[name] ??= rest;
+  }
 
   for (const { structures: structs } of files) {
     for (const s of structs) {
@@ -278,6 +298,8 @@ export function buildIndex(files, meta = {}) {
         args: fn.args,
         returns: fn.returns,
       };
+      const guardedBy = (fn.flags ?? []).filter((k) => Object.hasOwn(preconditions, k));
+      if (guardedBy.length) entry.preconditions = guardedBy;
       if (fn.secretReturns) secretReturnCount += 1;
       else if (fn.conditional) conditionalCount += 1;
       if (fn.system && (fn.aspects || fn.protectedFunction)) {
@@ -316,6 +338,7 @@ export function buildIndex(files, meta = {}) {
     functions: sorted(functions),
     structures: sorted(structures),
     widgets: Object.fromEntries(Object.keys(widgets).sort().map((k) => [k, sorted(widgets[k])])),
+    preconditions: sorted(preconditions),
   };
 }
 
@@ -433,6 +456,7 @@ export async function loadSnapshot(path = SNAPSHOT_PATH) {
   }
   index.structures ??= {};
   index.widgets ??= {};
+  index.preconditions ??= {};
   cached = { path, index };
   return index;
 }

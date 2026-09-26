@@ -157,6 +157,12 @@ export const RULES = {
     summary: 'SetCooldown or Clear called on a protected cooldown frame',
     source: `${PATCH1215} : "The SetCooldown and Clear cooldown APIs can no longer be called from tainted code when the cooldown frame itself is protected." Blizzard_APIDocumentationGenerated marks the six FrameAPICooldown methods IsProtectedFunction = true in 12.1.5 and marked none of them in 12.1.`,
   },
+  WSL022: {
+    severity: 'warning',
+    patch: '12.1.5',
+    summary: 'secret text passed to C_Intl.Transliterate with a Null or Remove transliterator',
+    source: `Blizzard_APIDocumentationGenerated (12.1.5 build 69952): C_Intl.Transliterate carries the TransliteratorAllowed precondition, "Prevents Remove and Null transliterators when used with secret text arguments.", FailureMode = "ReturnNothing". The call returns nothing rather than erroring, so this is a warning. ${PATCH1215} : C_Intl.Transliterate "does not allow Null or Remove transliterators for secret text from tainted code."`,
+  },
 };
 
 export const RULE_IDS = Object.keys(RULES);
@@ -539,6 +545,35 @@ export const PROTECTED_COOLDOWN_GLOBAL = new RegExp(`^${ACTION_BUTTON_NAME}Coold
  * lossOfControlCooldown and chargeCooldown.
  */
 export const COOLDOWN_FIELDS = new Set(['cooldown', 'chargeCooldown', 'lossOfControlCooldown']);
+
+/** The precondition WSL022 reads off a function's snapshot entry. */
+export const TRANSLITERATOR_PRECONDITION = 'TransliteratorAllowed';
+
+/**
+ * 'Null' or 'Remove' when an ICU transliterator ID runs one of them, else null. A compound ID
+ * chains segments with ';', and each may carry a leading [set] filter and a trailing
+ * (inverse), as in "NFD; [:Nonspacing Mark:] Remove; NFC". IDs are case-insensitive.
+ */
+export function refusedTransliterator(id) {
+  for (const segment of String(id).split(';')) {
+    let s = segment.trim();
+    if (s.startsWith('[')) {
+      let depth = 0;
+      let end = 0;
+      for (; end < s.length; end++) {
+        if (s[end] === '\\') end++;
+        else if (s[end] === '[') depth++;
+        else if (s[end] === ']' && --depth === 0) break;
+      }
+      s = s.slice(end + 1).trim();
+    }
+    s = s.replace(/\(.*\)$/, '').trim();
+    const target = s.slice(s.lastIndexOf('-') + 1).split('/')[0].trim().toLowerCase();
+    if (target === 'null') return 'Null';
+    if (target === 'remove') return 'Remove';
+  }
+  return null;
+}
 
 export const COOLDOWN_SUGGESTION =
   'drive your own Cooldown frame instead, or leave the protected one to Blizzard';

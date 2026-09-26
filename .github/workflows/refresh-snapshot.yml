@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or tag of Gethe/wow-ui-source to rebuild from'
+        description: 'Branch or tag of Gethe/wow-ui-source to rebuild from (empty: the vendored patch tag, then live)'
         required: false
-        default: live
+        default: ''
 
 permissions:
   contents: write
@@ -23,19 +23,37 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      # The mirror tags a new patch before it moves `live`, so dispatch this with the tag
-      # (e.g. 12.1.5) to pick a patch up early. Until `live` catches up, its own builds keep
-      # documenting the older surface; guard-refresh.mjs drops those rather than walk the
-      # vendored snapshot backwards a patch.
-      - run: node bin/wow-secret-lint.mjs --refresh --refresh-ref=${{ inputs.ref || 'live' }}
-      - run: node scripts/guard-refresh.mjs
+      # The mirror tags a new patch before it moves `live`, and moves that tag forward across
+      # PTR builds. So with no ref given, rebuild from the vendored snapshot's own tag first,
+      # then from live, each judged by guard-refresh.mjs against what came before it. A later
+      # build of the vendored patch is kept; an older patch or build is dropped.
+      - name: Refresh from the vendored patch tag
+        if: ${{ !inputs.ref }}
+        continue-on-error: true
+        run: |
+          tag=$(node -p "require('./data/api-snapshot.json').ref ?? ''")
+          if [[ "$tag" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            node bin/wow-secret-lint.mjs --refresh --refresh-ref="$tag"
+            node scripts/guard-refresh.mjs
+          else
+            echo "vendored ref '$tag' is not a patch tag; skipping"
+          fi
+      - name: Refresh from ${{ inputs.ref || 'live' }}
+        env:
+          REF: ${{ inputs.ref || 'live' }}
+        run: |
+          cp data/api-snapshot.json "$RUNNER_TEMP/before.json"
+          node bin/wow-secret-lint.mjs --refresh --refresh-ref="$REF"
+          node scripts/guard-refresh.mjs data/api-snapshot.json --against="$RUNNER_TEMP/before.json"
+      - id: stamp
+        run: echo "about=$(node -p "const s=require('./data/api-snapshot.json'); s.ref + ' (' + s.patch + ' build ' + s.build + ')'")" >> "$GITHUB_OUTPUT"
       - run: npm test
       - uses: peter-evans/create-pull-request@v7
         with:
-          commit-message: "data: refresh API snapshot from wow-ui-source@${{ inputs.ref || 'live' }}"
+          commit-message: 'data: refresh API snapshot from wow-ui-source@${{ steps.stamp.outputs.about }}'
           title: 'Refresh API snapshot'
           body: |
-            Rebuilt `data/api-snapshot.json` from the ${{ inputs.ref || 'live' }} mirror of Blizzard's
-            generated API documentation. Tests passed against the new snapshot.
+            Rebuilt `data/api-snapshot.json` from wow-ui-source@${{ steps.stamp.outputs.about }}, the mirror
+            of Blizzard's generated API documentation. Tests passed against the new snapshot.
           branch: refresh-api-snapshot
           delete-branch: true
