@@ -1,6 +1,74 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 - 2026-09-26
+
+The snapshot moves to patch 12.1.5 **build 69952** (mirror commit `5c9363cc`,
+2026-09-22, the third 12.1.5 PTR round) from the first PTR build 69594 that
+1.7.0 carried. The mirror moved its `12.1.5` tag forward in between, and the
+weekly refresh only ever looked at `live`, so nothing picked it up on its own.
+
+### Changed
+
+- **`C_Intl` accepts secret text.** 25 `C_Intl` functions moved from
+  `SecretArguments = "AllowedWhenUntainted"` to `"AllowedWhenTainted"`, so
+  WSL006 no longer fires on `C_Intl.ToUpper`, `C_Intl.ToLower`,
+  `C_Intl.Transliterate` and the rest. `C_Intl.CreateLocaleContext` did not
+  move and still reports WSL006. `C_LocaleContext` is gone as a namespace (its
+  22 entries left the snapshot): the functions are now methods on the object
+  `CreateLocaleContext` returns. The README worked example is replaced with this
+  change, reproduced in `test/fixtures/worked-example-intl/`.
+- **Other surface changes in 69952.** `C_PvP.GetArenaOpponentSpec` is newly
+  documented, with `SecretReturns = true`, and the legacy `GetArenaOpponentSpec`
+  global resolves to it (the notes: "The GetArenaOpponentSpec API now returns
+  secrets."). `IsRaidMarkerActive` gained
+  `SecretInChatMessagingLockdown`. `DamageMeterCombatSource.sourceGUID` became
+  conditionally secret. The `C_PvP` random training ground APIs split into arena
+  and battleground variants, and `C_AdventureMap.GetNumMapInsets`,
+  `GetNumQuestOffers`, `GetNumZoneChoices` and
+  `C_UnitAuras.GetRefreshCarryOverDuration` are new. Counts: 10,242 functions
+  (was 10,250), 21 with `SecretReturns` (was 20), 316 conditionally secret (was
+  314), 760 structures.
+- **Corpus numbers.** On the 12-addon corpus every mode gains the same five
+  findings and loses none, all from `GetArenaOpponentSpec`: four WSL009
+  warnings in oUF's arena preparation (`units.lua`, and its copies in KkthnxUI
+  and SpartanUI) and one WSL002 on a `specID > 0` in SpartanUI's
+  `oUF_PVPSpecIcons.lua`. Default 379 errors / 121 warnings becomes 379 / 126,
+  `--strict` 489 / 11 becomes 490 / 15, `--patch=12.0` 20 / 90 becomes 20 / 95
+  and `--patch=12.0 --strict` 110 / 0 becomes 111 / 4. `--patch` pins the rule
+  set, not the snapshot, so the 12.0 and 12.1 rows move too. The recorded
+  fixture baselines for `--patch=12.0` and `--patch=12.1` are unchanged byte
+  for byte. No addon in the corpus passes a secret into `C_Intl`, and none
+  triggers WSL022.
+- **The weekly refresh tries the vendored patch tag before `live`.** With no
+  `ref` input, the workflow rebuilds from the snapshot's own `ref` when that is
+  a patch tag, then from `live`, and guards each against what came before it.
+  If the tag is gone from the mirror, the run leaves a warning annotation and
+  goes on to `live`.
+  `scripts/guard-refresh.mjs` now also reverts a lower build of the same patch
+  (or one with no build stamp), and takes `--against=<file>` so the second
+  rebuild is judged against the first one rather than against `HEAD`.
+
+### Added
+
+- **WSL022** (warning, 12.1.5): secret text passed to `C_Intl.Transliterate`
+  with a transliterator ID that runs `Null` or `Remove`, such as
+  `Any-Null`, `[:Mn:] Remove` or `NFD; [:Nonspacing Mark:] Remove; NFC`. The
+  function carries the `TransliteratorAllowed` precondition, whose
+  `FailureMode` is `ReturnNothing`: the call returns nothing instead of
+  erroring, so this stays a warning under `--strict`. The ID has to resolve in
+  the file, as a literal, a local holding one, or a concatenation of those; an
+  ID built at runtime is not reported.
+- **Preconditions in the snapshot.** Functions that name a `Predicates` entry
+  of type `Precondition` carry it as `preconditions`, and the snapshot has a
+  top-level `preconditions` map with each one's failure mode and documentation
+  (37 of them).
+- The snapshot carries the two new texture aspects, `SetTexture` on
+  `SimpleTextureBaseAPI:ClearSVG`, `SetColorTexture` and `SetSVG`, and
+  `QueryRotation` on `GetRotation`. No rule reads them, because nothing
+  documents which textures carry those aspects. Two other 12.1.5 notes, castbar
+  IDs unique per unit token and 1-based offsets from
+  `C_Intl.FindStringMatches` and `FindBreaks`, have no rule either. The README
+  says why.
 
 ### Fixed
 
@@ -14,6 +82,24 @@
   compares the patch as well: a refresh on an older patch than the vendored one
   is reverted, and so is one that could not read the mirror's build stamp at all.
   Nothing in the published package changed.
+- **A function the file defines now shadows a documented API of the same
+  name.** Namespaced functions are also indexed under their bare names, so
+  `local function round(v)` resolved to `math.round` and a secret passed to it
+  reported WSL006. The same held for a global `function contains()` against
+  `table.contains`, and for a local that redefines `UnitHealth`.
+- **String constants are read only where they are in scope.** A parameter
+  named like a file-level constant took the constant's value, and a local set
+  inside one function stayed visible after it. Unit-token checks and WSL022
+  both read these, so `local function strip(ID)` next to an unrelated
+  `local ID = 'Any-Remove'` got a WSL022 on its call. No finding in the corpus
+  moves with either fix.
+- **Refresh workflow edge cases.** A rebuild that only changes the mirror ref
+  or commit (`live` catching up to a build the tag already had) is now reverted
+  like a timestamp-only one. A `live` rebuild that fails leaves a warning and
+  keeps the tag step's result, unless the run asked for that ref explicitly. A
+  refresh that breaks the tests still opens its pull request, says so in the
+  body, and fails the run. `guard-refresh.mjs` takes `--against <file>` as well
+  as `--against=<file>`.
 
 ## 1.7.0 - 2026-09-13
 

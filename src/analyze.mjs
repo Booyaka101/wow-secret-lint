@@ -48,6 +48,8 @@ import {
   PROTECTED_COOLDOWN_GLOBAL,
   PROTECTED_BUTTON_GLOBAL,
   isProtectedTemplate,
+  TRANSLITERATOR_PRECONDITION,
+  refusedTransliterator,
 } from './rules.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
@@ -246,8 +248,9 @@ class Analyzer {
     return null;
   }
 
+  /** The documented API a call resolves to, unless this file defines a function of that name. */
   apiEntry(name) {
-    if (!name) return null;
+    if (!name || this.localFns.has(name)) return null;
     return Object.prototype.hasOwnProperty.call(this.api.functions, name) ? this.api.functions[name] : null;
   }
 
@@ -986,6 +989,7 @@ class Analyzer {
     const entry = callee.method ? null : this.apiEntry(name);
     if (entry) {
       if (this.patch121) this.checkRenamedStructFields(entry, args);
+      if (this.patch1215) this.checkTransliterator(entry, name, args, argTaints);
       const sa = entry.secretArguments;
       for (let i = 0; i < args.length; i++) {
         const t = argTaints[i];
@@ -1226,6 +1230,27 @@ class Analyzer {
     }
   }
 
+  /**
+   * WSL022. The precondition only refuses the transliterator when the text is secret, so both
+   * halves have to be provable here: a tracked secret first argument, and an ID this file
+   * resolves to a string. Anything built at runtime is left alone.
+   */
+  checkTransliterator(entry, name, args, argTaints) {
+    if (!entry.preconditions || !entry.preconditions.includes(TRANSLITERATOR_PRECONDITION)) return;
+    const t = argTaints[0];
+    const id = this.constString(args[1]);
+    const refused = t && !t.container && id !== null ? refusedTransliterator(id) : null;
+    if (!refused) return;
+    const pre = (this.api.preconditions && this.api.preconditions[TRANSLITERATOR_PRECONDITION]) || {};
+    this.report(
+      'WSL022',
+      args[1],
+      `${name}() refuses the ${refused} transliterator ('${id}') for secret text from tainted code and returns ` +
+        `nothing (${TRANSLITERATOR_PRECONDITION}, FailureMode ${pre.failureMode ?? 'ReturnNothing'}): ${this.describe(t)}`,
+      { taint: t }
+    );
+  }
+
   // ------------------------------------------------------------- patch 12.1 checks
 
   /**
@@ -1400,8 +1425,13 @@ class Analyzer {
     const paramBindings = new Map();
     const hookedSelf = this.hookedSelfOf(fnNode);
     if (hookedSelf) this.widgetOf.set(hookedSelf, 'HookedCooldown');
+    // String constants are keyed by name, not scope: a parameter hides the outer one, and a
+    // local declared in here must not outlive the body.
+    const outerConsts = this.stringConst;
+    this.stringConst = new Map(outerConsts);
     params.forEach((p, i) => {
       if (p.type !== 'Identifier') return;
+      this.stringConst.delete(p.name);
       const hit = taintedParams.find((tp) => tp.index === i);
       if (!hit) {
         inner.declare(p.name, null);
@@ -1416,6 +1446,7 @@ class Analyzer {
     });
     this.hoistLocalFunctions(fnNode.body, inner);
     this.block(fnNode.body, inner);
+    this.stringConst = outerConsts;
     if (hookedSelf) this.widgetOf.delete(hookedSelf);
     if (!taintedParams.length) this.recordReturnTaint(fnNode, inner);
     return paramBindings;

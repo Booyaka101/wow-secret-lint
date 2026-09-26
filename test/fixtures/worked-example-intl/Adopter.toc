@@ -1,0 +1,6 @@
+## Interface: 120105
+## Title: Adopter
+## Notes: Worked example for the C_Intl change in 12.1.5 build 69952.
+
+Adopter.lua
+Locale.lua

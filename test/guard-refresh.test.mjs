@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVolatile, sameContent, comparePatch, guardRefresh } from '../scripts/guard-refresh.mjs';
@@ -29,9 +29,9 @@ describe('pure comparison', () => {
     expect(sameContent(a, b)).toBe(false);
   });
 
-  it('strips exactly generated and files, nothing else', () => {
-    const stripped = stripVolatile({ generated: 't', files: 1, keep: 'me' });
-    expect(stripped).toEqual({ keep: 'me' });
+  it('strips the rebuild metadata and nothing else', () => {
+    const stripped = stripVolatile({ generated: 't', files: 1, ref: 'live', commit: 'c', source: 's', build: 1, keep: 'me' });
+    expect(stripped).toEqual({ build: 1, keep: 'me' });
   });
 });
 
@@ -112,19 +112,19 @@ describe('guardRefresh, against a real throwaway git repo', () => {
   });
 });
 
-describe('the downgrade guard, against a real throwaway git repo', () => {
-  function commitSnapshot(snapshot) {
-    const dir = mkdtempSync(join(tmpdir(), 'wsl-guard-'));
-    const run = (cmd) => execSync(cmd, { cwd: dir, stdio: 'pipe' });
-    run('git init -q');
-    run('git config user.email test@example.com');
-    run('git config user.name test');
-    writeFileSync(join(dir, 'snap.json'), JSON.stringify(snapshot));
-    run('git add snap.json');
-    run('git commit -q -m init');
-    return { dir, run };
-  }
+function commitSnapshot(snapshot) {
+  const dir = mkdtempSync(join(tmpdir(), 'wsl-guard-'));
+  const run = (cmd) => execSync(cmd, { cwd: dir, stdio: 'pipe' });
+  run('git init -q');
+  run('git config user.email test@example.com');
+  run('git config user.name test');
+  writeFileSync(join(dir, 'snap.json'), JSON.stringify(snapshot));
+  run('git add snap.json');
+  run('git commit -q -m init');
+  return { dir, run };
+}
 
+describe('the downgrade guard, against a real throwaway git repo', () => {
   // The 2026-09-14 failure exactly: `live` was a later 12.1.0 build than the 12.1.5 tag we
   // vendored from, so the content genuinely differed and the old guard kept it.
   it('reverts a newer build of an older patch', () => {
@@ -178,6 +178,81 @@ describe('the downgrade guard, against a real throwaway git repo', () => {
     const result = guardRefresh('snap.json', dir);
     expect(result).toMatchObject({ reverted: true, reason: 'older-patch' });
     expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// The mirror moves a patch tag forward across PTR builds: 12.1.5 pointed at 69594 on
+// 2026-09-03 and at 69952 by 2026-09-26, with C_Intl changing underneath it.
+describe('builds within one patch, against a real throwaway git repo', () => {
+  const VENDORED = { generated: 'old', patch: '12.1.5', build: 69594, functionCount: 10250 };
+
+  it('keeps a higher build of the same patch whose content differs', () => {
+    const { dir, run } = commitSnapshot(VENDORED);
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new', build: 69952, functionCount: 10242 }));
+
+    const result = guardRefresh('snap.json', dir);
+    expect(result).toMatchObject({ reverted: false, reason: null, build: 69952, committedBuild: 69594 });
+    expect(run('git diff --stat snap.json').toString()).not.toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reverts a lower build of the same patch', () => {
+    const { dir, run } = commitSnapshot({ ...VENDORED, build: 69952, functionCount: 10242 });
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new' }));
+
+    const result = guardRefresh('snap.json', dir);
+    expect(result).toMatchObject({ reverted: true, reason: 'older-build', build: 69594, committedBuild: 69952 });
+    expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reverts a rebuild of the same patch and build whose content is unchanged', () => {
+    const { dir, run } = commitSnapshot(VENDORED);
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new' }));
+
+    const result = guardRefresh('snap.json', dir);
+    expect(result).toMatchObject({ reverted: true, reason: 'unchanged' });
+    expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reverts live once it reaches the vendored build, even from another mirror commit', () => {
+    const { dir, run } = commitSnapshot({ ...VENDORED, ref: '12.1.5', commit: 'aaa' });
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new', ref: 'live', commit: 'bbb' }));
+
+    expect(guardRefresh('snap.json', dir)).toMatchObject({ reverted: true, reason: 'unchanged' });
+    expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reverts a same-patch refresh that lost its build stamp', () => {
+    const { dir, run } = commitSnapshot(VENDORED);
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new', build: null, functionCount: 10251 }));
+
+    const result = guardRefresh('snap.json', dir);
+    expect(result).toMatchObject({ reverted: true, reason: 'older-build' });
+    expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // The scheduled run refreshes from the vendored tag, then from live. The second guard has to
+  // judge live against the kept tag refresh, not HEAD, or a later 12.1.0 build would compare
+  // against 12.1.5 69594, lose, and take the kept 69952 refresh down with it.
+  it('judges a second refresh against the copy taken before it, and restores that copy', () => {
+    const { dir, run } = commitSnapshot(VENDORED);
+    const tagRefresh = JSON.stringify({ ...VENDORED, generated: 'tag', build: 69952, functionCount: 10242 });
+    writeFileSync(join(dir, 'snap.json'), tagRefresh);
+    expect(guardRefresh('snap.json', dir)).toMatchObject({ reverted: false });
+
+    writeFileSync(join(dir, 'before-live.json'), tagRefresh);
+    writeFileSync(
+      join(dir, 'snap.json'),
+      JSON.stringify({ generated: 'live', patch: '12.1.0', build: 69990, functionCount: 10080 })
+    );
+    const result = guardRefresh('snap.json', dir, 'before-live.json');
+    expect(result).toMatchObject({ reverted: true, reason: 'older-patch', committedPatch: '12.1.5', committedBuild: 69952 });
+    expect(readFileSync(join(dir, 'snap.json'), 'utf8')).toBe(tagRefresh);
     rmSync(dir, { recursive: true, force: true });
   });
 });

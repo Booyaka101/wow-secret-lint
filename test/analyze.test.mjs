@@ -54,6 +54,15 @@ describe('forbidden operations', () => {
     expect(ids('local hp = UnitHealth("t")\nlocal v = scrubsecretvalues(hp)\n')).toEqual([]);
   });
 
+  // math.round and table.contains are indexed under their bare names too, and `round` is a
+  // common helper name. The file's own function is what the call reaches.
+  it('a function the file defines wins over a documented API of the same name', () => {
+    expect(ids('local function round(v) return v end\nlocal x = round(UnitHealth("t"))\n', { strict: true })).toEqual([]);
+    expect(ids('function contains(t, v) return false end\ncontains(UnitSpellTargetName("t"), "x")\n', { strict: true })).toEqual([]);
+    expect(ids('local function UnitHealth() return 1 end\nlocal hp = UnitHealth("t")\nlocal x = hp * 2\n')).toEqual([]);
+    expect(ids('local function round(v) return v + 0.5 end\nlocal x = round(UnitHealth("t"))\n')).toEqual(['WSL001@1']);
+  });
+
   it('WSL007 errors on a documented bool secret and stays silent on a documented non-bool', () => {
     const bool = run('local r = UnitInRange("t")\nif r then end\n', { strict: true }).findings;
     expect(bool.map((f) => [f.ruleId, f.severity])).toEqual([['WSL007', 'error']]);
@@ -233,8 +242,8 @@ describe('rule filtering and failure handling', () => {
     expect(ids('local hp = UnitHealth("t")\nlocal x = hp * 2\n', { disable: ['WSL001'] })).toEqual([]);
   });
 
-  it('every rule id in the table is reachable from the fixtures or these tests', () => {
-    expect(RULE_IDS).toHaveLength(21);
+  it('the rule table lists 22 rules', () => {
+    expect(RULE_IDS).toHaveLength(22);
   });
 
   it('reports a parse error instead of throwing', () => {
