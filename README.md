@@ -298,7 +298,7 @@ cd:SetCooldown(GetTime(), 10)   -- WSL021
 cd:IsPaused()                   -- silent, reading is not a protected function
 ```
 
-**WSL022** is the one 12.1.5 rule that stays a warning, even under `--strict`. Build 69952 let secret text into `C_Intl.Transliterate` but attached a precondition, `TransliteratorAllowed`: *"Prevents Remove and Null transliterators when used with secret text arguments."* Its `FailureMode` is `ReturnNothing`, so a refused call does not error. It returns nothing and your label goes blank. The rule reads the second argument as an ICU transliterator ID when it is a string literal or a local holding one, and fires when any segment of it targets `Null` or `Remove`: `Any-Null`, `any-remove`, `[:Mn:] Remove`, or a compound ID like the accent stripper below. An ID built at runtime is left alone, since there is nothing to read.
+**WSL022** is the one 12.1.5 rule that stays a warning, even under `--strict`. Build 69952 let secret text into `C_Intl.Transliterate` but attached a precondition, `TransliteratorAllowed`: *"Prevents Remove and Null transliterators when used with secret text arguments."* Its `FailureMode` is `ReturnNothing`, so a refused call does not error. It returns nothing and your label goes blank. The rule reads the second argument as an ICU transliterator ID when it is a string literal, a local holding one, or a concatenation of those, and fires when any segment of it targets `Null` or `Remove`: `Any-Null`, `any-remove`, `[:Mn:] Remove`, or a compound ID like the accent stripper below. An ID built at runtime is left alone, since there is nothing to read.
 
 ```lua
 local name = UnitSpellTargetName("target")
@@ -307,6 +307,8 @@ C_Intl.Transliterate(name, "NFD; [:Nonspacing Mark:] Remove; NFC")   -- WSL022
 ```
 
 The same build added two forbidden aspects with no rule behind them: `SetTexture` (checked by `ClearSVG`, `SetColorTexture` and `SetSVG`) and `QueryRotation` (checked by `GetRotation`), all on `SimpleTextureBaseAPI`. The snapshot carries them, but nothing Blizzard publishes says which textures carry those aspects, and guessing would flag every addon that colours its own texture. When that is documented, a rule can read the method list out of the snapshot the way WSL019 and WSL020 do.
+
+Two more 12.1.5 notes change behaviour without leaving anything a static check can pin down. *"Castbar IDs are now unique per unit token, preventing addons from using them to compare units"*, so `castBarID` from `UnitCastingInfo("target")` no longer equals the one from `UnitCastingInfo("focus")` for the same caster. And *"The C_Intl.FindStringMatches and C_Intl.FindBreaks APIs now return 1-based indices"*, so code that added 1 to those byte offsets is now off by one. The snapshot documents neither, and a rule would have to guess which comparison or which `+ 1` was meant. In the corpus, Dominos, LittleWigs and Details' castbar compare a `castBarID` only against one stored for the same unit, which still works, and nothing calls either `C_Intl` function. Check those by hand if your addon relies on them.
 
 ### What it will never flag
 
@@ -378,7 +380,7 @@ Run against 12 real retail addons (BigWigs, LittleWigs, DBM, WeakAuras, Details,
 | `--patch=12.0` | 20 | 95 | 3 of 12 |
 | `--patch=12.0 --strict` | 111 | 4 | 5 of 12 |
 
-`--patch` pins the rules, not the documentation they read. On the 1.7.0 snapshot the two `12.0` rows were identical to what v1.2.0 reported and the `12.1` rows to what v1.4.2 reported. Build 69952 then added `SecretReturns = true` to `GetArenaOpponentSpec`, and that one change is the whole difference in every row: four new WSL009 warnings in oUF's arena preparation code and its copies in KkthnxUI and SpartanUI, plus a `specID > 0` comparison in SpartanUI's `oUF_PVPSpecIcons.lua`. Nothing went away, and the `C_Intl` change moved no number, because no addon here passes a secret into `C_Intl`. Everything above the `12.0` rows is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
+`--patch` pins the rules, not the documentation they read. On the 1.7.0 snapshot the two `12.0` rows were identical to what v1.2.0 reported and the `12.1` rows to what v1.4.2 reported. Build 69952 then documented `C_PvP.GetArenaOpponentSpec` with `SecretReturns = true`, which the legacy `GetArenaOpponentSpec` global resolves to (the notes: *"The GetArenaOpponentSpec API now returns secrets."*), and that one change is the whole difference in every row: four new WSL009 warnings in oUF's arena preparation code and its copies in KkthnxUI and SpartanUI, plus a `specID > 0` comparison in SpartanUI's `oUF_PVPSpecIcons.lua`. Nothing went away, and the `C_Intl` change moved no number, because no addon here passes a secret into `C_Intl`. Everything above the `12.0` rows is the 12.1 surface landing, concentrated exactly where the [PTR forum thread](https://us.forums.blizzard.com/en/wow/t/minicc-and-similar-addons-might-be-partially-broken-in-121/2310937) predicted breakage:
 
 | Rule | Count | Where |
 | --- | --- | --- |
@@ -482,7 +484,7 @@ The mirror tags a client build before it moves its `live` branch, which is how 1
 npx wow-secret-lint --refresh --refresh-ref=12.1.5
 ```
 
-It also moves a patch tag forward across PTR builds. `12.1.5` pointed at build 69594 on 2026-09-03 and at 69952 on 2026-09-22, which is how the `C_Intl` change arrived. So the weekly workflow in this repo rebuilds from the vendored snapshot's own patch tag first, then from `live`. It keeps a rebuild only when it is a later patch, or a later build of the same patch, and its content differs. A pull request opens only when a rebuild was kept.
+It also moves a patch tag forward across PTR builds. `12.1.5` pointed at build 69594 on 2026-09-03 and at 69952 on 2026-09-22, which is how the `C_Intl` change arrived. So the weekly workflow in this repo rebuilds from the vendored snapshot's own patch tag first, then from `live`. It keeps a rebuild only when it is a later patch, or a later build of the same patch, and the API content differs; a new timestamp or mirror commit alone does not count. A pull request opens only when a rebuild was kept, and it opens even if the tests fail against the new snapshot, with the failure in its body, since that is the diff that most needs a look.
 
 The snapshot records the patch and build it came from, read off the mirror's own commit message, and `--refresh` will not walk it backwards onto an older build without `--force`. Point it at a stale ref and it says so and leaves the file alone:
 
@@ -513,7 +515,7 @@ The 12.1 aura and identity secrecy is deliberately **not** part of the snapshot:
 npm test
 ```
 
-289 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), the `C_Intl` worked example (`test/fixtures/worked-example-intl/`), the refresh guard run against throwaway git repos, recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
+292 tests. The suite covers every rule, the guard forms, the permitted-operations negative cases, the three reporters, the CLI surface, one violating and one clean fixture per 12.1 and 12.1.5 rule (`test/fixtures/rules-121/`, `test/fixtures/rules-1215/`), the `C_Intl` worked example (`test/fixtures/worked-example-intl/`), the refresh guard run against throwaway git repos, recorded baselines proving `--patch=12.0` reproduces the v1.2.0 output and `--patch=12.1` the v1.4.2 output byte for byte over the whole fixture corpus (`test/fixtures/patch/`), a six-file addon exercising widget typing across files in load order (`test/fixtures/cross-file/`), the `--baseline` round trip, and eight regression fixtures reconstructed from real shipped traces:
 
 | Fixture | Issue |
 | --- | --- |

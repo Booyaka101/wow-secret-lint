@@ -19,9 +19,12 @@ import { readFileSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/** Drop fields that change on every run regardless of whether the API data did. */
+/**
+ * Drop the fields that describe the rebuild rather than the API: the timestamp changes every
+ * run, and the mirror ref and commit change when `live` reaches a build the tag already had.
+ */
 export function stripVolatile(snapshot) {
-  const { generated, files, ...rest } = snapshot;
+  const { generated, files, ref, commit, source, ...rest } = snapshot;
   return rest;
 }
 
@@ -86,14 +89,15 @@ export function guardRefresh(path, cwd = process.cwd(), against = null) {
 // CLI entry point. `scripts/guard-refresh.mjs [path] [--against=<copy>]`, defaulting to the
 // real snapshot judged against HEAD.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let path = 'data/api-snapshot.json';
+  let against = null;
   const args = process.argv.slice(2);
-  const path = args.find((a) => !a.startsWith('--')) ?? 'data/api-snapshot.json';
-  const against = args.find((a) => a.startsWith('--against='));
-  const { reason, patch, build, committedPatch, committedBuild } = guardRefresh(
-    path,
-    process.cwd(),
-    against ? against.slice('--against='.length) : null
-  );
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--against') against = args[++i];
+    else if (args[i].startsWith('--against=')) against = args[i].slice('--against='.length);
+    else path = args[i];
+  }
+  const { reason, patch, build, committedPatch, committedBuild } = guardRefresh(path, process.cwd(), against);
   if (reason === 'older-patch') {
     console.log(
       `refresh is patch ${patch ?? 'unknown'}, behind the vendored ${committedPatch}; ` +

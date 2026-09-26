@@ -248,8 +248,9 @@ class Analyzer {
     return null;
   }
 
+  /** The documented API a call resolves to, unless this file defines a function of that name. */
   apiEntry(name) {
-    if (!name) return null;
+    if (!name || this.localFns.has(name)) return null;
     return Object.prototype.hasOwnProperty.call(this.api.functions, name) ? this.api.functions[name] : null;
   }
 
@@ -1424,8 +1425,13 @@ class Analyzer {
     const paramBindings = new Map();
     const hookedSelf = this.hookedSelfOf(fnNode);
     if (hookedSelf) this.widgetOf.set(hookedSelf, 'HookedCooldown');
+    // String constants are keyed by name, not scope: a parameter hides the outer one, and a
+    // local declared in here must not outlive the body.
+    const outerConsts = this.stringConst;
+    this.stringConst = new Map(outerConsts);
     params.forEach((p, i) => {
       if (p.type !== 'Identifier') return;
+      this.stringConst.delete(p.name);
       const hit = taintedParams.find((tp) => tp.index === i);
       if (!hit) {
         inner.declare(p.name, null);
@@ -1440,6 +1446,7 @@ class Analyzer {
     });
     this.hoistLocalFunctions(fnNode.body, inner);
     this.block(fnNode.body, inner);
+    this.stringConst = outerConsts;
     if (hookedSelf) this.widgetOf.delete(hookedSelf);
     if (!taintedParams.length) this.recordReturnTaint(fnNode, inner);
     return paramBindings;

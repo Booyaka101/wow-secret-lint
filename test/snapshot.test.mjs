@@ -316,7 +316,7 @@ describe('vendored snapshot', () => {
   it('is the 12.1.5 documentation, with the markers the 12.1.5 rules read', async () => {
     const api = await loadSnapshot();
     expect(api.patch).toBe('12.1.5');
-    expect(api.build).toBe(69952);
+    expect(api.build).toBeGreaterThanOrEqual(69952);
     expect(api.widgets.SimpleAnimGroupAPI.IsPlaying.aspects).toContainEqual({
       aspect: 'QueryAnimationProgress',
       argument: 'self',

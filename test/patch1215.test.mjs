@@ -139,6 +139,10 @@ describe('WSL022, C_Intl.Transliterate', () => {
     expect(refusedTransliterator('NFD; [:Nonspacing Mark:] Remove; NFC')).toBe('Remove');
     expect(refusedTransliterator('Latin-ASCII; Any-Null/Variant')).toBe('Null');
     expect(refusedTransliterator('Any-Remove (Any-Latin)')).toBe('Remove');
+    expect(refusedTransliterator('[;] Remove')).toBe('Remove');
+    expect(refusedTransliterator('[[:Mn:];-] Remove; NFC')).toBe('Remove');
+    expect(refusedTransliterator('NFD; \\p{Mn} Remove; NFC')).toBe('Remove');
+    expect(refusedTransliterator("[']'] Remove")).toBe('Remove');
   });
 
   it('lets every other ID through, including ones that merely mention the words', () => {
@@ -147,11 +151,27 @@ describe('WSL022, C_Intl.Transliterate', () => {
     expect(refusedTransliterator('Any-Latin (Any-Remove)')).toBeNull();
     expect(refusedTransliterator('[:Remove:] Any-Latin')).toBeNull();
     expect(refusedTransliterator('Null-Latin')).toBeNull();
+    expect(refusedTransliterator('Any-Latin; [;-Null]')).toBeNull();
+    expect(refusedTransliterator('\\p{Script=Null-Remove} Any-Latin')).toBeNull();
     expect(refusedTransliterator('')).toBeNull();
   });
 
   it('is silent when the ID is not a literal', () => {
     expect(ids("local n = UnitSpellTargetName('target')\nC_Intl.Transliterate(n, GetID())\n")).toEqual([]);
+  });
+
+  it('reads a constant only where it is in scope', () => {
+    const param = [
+      "local function setup() local ID = 'Any-Remove' return ID end",
+      "local function strip(ID) return C_Intl.Transliterate(UnitSpellTargetName('target'), ID) end",
+    ];
+    expect(ids(param.join('\n') + '\n')).toEqual([]);
+    const upvalue = [
+      "local ID = 'Any-Remove'",
+      'local function g() local ID = GetID() end',
+      "local function h() return C_Intl.Transliterate(UnitSpellTargetName('target'), ID) end",
+    ];
+    expect(ids(upvalue.join('\n') + '\n')).toEqual(['WSL022@3']);
   });
 });
 

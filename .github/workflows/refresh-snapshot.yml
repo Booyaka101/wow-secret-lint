@@ -29,31 +29,49 @@ jobs:
       # build of the vendored patch is kept; an older patch or build is dropped.
       - name: Refresh from the vendored patch tag
         if: ${{ !inputs.ref }}
-        continue-on-error: true
         run: |
           tag=$(node -p "require('./data/api-snapshot.json').ref ?? ''")
-          if [[ "$tag" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
-            node bin/wow-secret-lint.mjs --refresh --refresh-ref="$tag"
+          if [[ ! "$tag" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "vendored ref '$tag' is not a patch tag; skipping"
+          elif node bin/wow-secret-lint.mjs --refresh --refresh-ref="$tag"; then
             node scripts/guard-refresh.mjs
           else
-            echo "vendored ref '$tag' is not a patch tag; skipping"
+            echo "::warning::could not rebuild from wow-ui-source@$tag; keeping the vendored snapshot"
+            git checkout -- data/api-snapshot.json
           fi
       - name: Refresh from ${{ inputs.ref || 'live' }}
         env:
           REF: ${{ inputs.ref || 'live' }}
+          ASKED: ${{ inputs.ref }}
         run: |
           cp data/api-snapshot.json "$RUNNER_TEMP/before.json"
-          node bin/wow-secret-lint.mjs --refresh --refresh-ref="$REF"
-          node scripts/guard-refresh.mjs data/api-snapshot.json --against="$RUNNER_TEMP/before.json"
+          if node bin/wow-secret-lint.mjs --refresh --refresh-ref="$REF"; then
+            node scripts/guard-refresh.mjs data/api-snapshot.json --against="$RUNNER_TEMP/before.json"
+          elif [ -n "$ASKED" ]; then
+            exit 1
+          else
+            echo "::warning::could not rebuild from wow-ui-source@$REF; keeping what the tag step left"
+            cp "$RUNNER_TEMP/before.json" data/api-snapshot.json
+          fi
       - id: stamp
         run: echo "about=$(node -p "const s=require('./data/api-snapshot.json'); s.ref + ' (' + s.patch + ' build ' + s.build + ')'")" >> "$GITHUB_OUTPUT"
-      - run: npm test
+      # A new build can legitimately break tests, and that is when the diff most needs a look, so a
+      # failure still opens the pull request, says so in it, and then fails the run.
+      - id: tests
+        continue-on-error: true
+        run: npm test
       - uses: peter-evans/create-pull-request@v7
         with:
           commit-message: 'data: refresh API snapshot from wow-ui-source@${{ steps.stamp.outputs.about }}'
           title: 'Refresh API snapshot'
           body: |
             Rebuilt `data/api-snapshot.json` from wow-ui-source@${{ steps.stamp.outputs.about }}, the mirror
-            of Blizzard's generated API documentation. Tests passed against the new snapshot.
+            of Blizzard's generated API documentation.
+
+            ${{ steps.tests.outcome == 'success' && 'Tests passed against the new snapshot.' || format('**Tests failed against the new snapshot**, see {0}/{1}/actions/runs/{2}.', github.server_url, github.repository, github.run_id) }}
           branch: refresh-api-snapshot
           delete-branch: true
+      - if: ${{ steps.tests.outcome != 'success' }}
+        run: |
+          echo "::error::tests failed against the refreshed snapshot"
+          exit 1

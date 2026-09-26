@@ -555,19 +555,23 @@ export const TRANSLITERATOR_PRECONDITION = 'TransliteratorAllowed';
  * (inverse), as in "NFD; [:Nonspacing Mark:] Remove; NFC". IDs are case-insensitive.
  */
 export function refusedTransliterator(id) {
-  for (const segment of String(id).split(';')) {
-    let s = segment.trim();
-    if (s.startsWith('[')) {
-      let depth = 0;
-      let end = 0;
-      for (; end < s.length; end++) {
-        if (s[end] === '\\') end++;
-        else if (s[end] === '[') depth++;
-        else if (s[end] === ']' && --depth === 0) break;
-      }
-      s = s.slice(end + 1).trim();
-    }
-    s = s.replace(/\(.*\)$/, '').trim();
+  // Drop the filters first, [set] or \p{property}: a set can hold ';' or '-' of its own.
+  const text = String(id);
+  const skipTo = (close, from) => {
+    const at = text.indexOf(close, from);
+    return at < 0 ? text.length : at;
+  };
+  let bare = '';
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '\\') i = /[pPN]/.test(text[i + 1] ?? '') && text[i + 2] === '{' ? skipTo('}', i) : i + 1;
+    else if (text[i] === "'" && depth) i = skipTo("'", i + 1);
+    else if (text[i] === '[') depth++;
+    else if (text[i] === ']' && depth) depth--;
+    else if (!depth) bare += text[i];
+  }
+  for (const segment of bare.split(';')) {
+    const s = segment.trim().replace(/\(.*\)$/, '').trim();
     const target = s.slice(s.lastIndexOf('-') + 1).split('/')[0].trim().toLowerCase();
     if (target === 'null') return 'Null';
     if (target === 'remove') return 'Remove';

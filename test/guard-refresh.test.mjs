@@ -29,9 +29,9 @@ describe('pure comparison', () => {
     expect(sameContent(a, b)).toBe(false);
   });
 
-  it('strips exactly generated and files, nothing else', () => {
-    const stripped = stripVolatile({ generated: 't', files: 1, keep: 'me' });
-    expect(stripped).toEqual({ keep: 'me' });
+  it('strips the rebuild metadata and nothing else', () => {
+    const stripped = stripVolatile({ generated: 't', files: 1, ref: 'live', commit: 'c', source: 's', build: 1, keep: 'me' });
+    expect(stripped).toEqual({ build: 1, keep: 'me' });
   });
 });
 
@@ -213,6 +213,15 @@ describe('builds within one patch, against a real throwaway git repo', () => {
 
     const result = guardRefresh('snap.json', dir);
     expect(result).toMatchObject({ reverted: true, reason: 'unchanged' });
+    expect(run('git diff --stat snap.json').toString()).toBe('');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reverts live once it reaches the vendored build, even from another mirror commit', () => {
+    const { dir, run } = commitSnapshot({ ...VENDORED, ref: '12.1.5', commit: 'aaa' });
+    writeFileSync(join(dir, 'snap.json'), JSON.stringify({ ...VENDORED, generated: 'new', ref: 'live', commit: 'bbb' }));
+
+    expect(guardRefresh('snap.json', dir)).toMatchObject({ reverted: true, reason: 'unchanged' });
     expect(run('git diff --stat snap.json').toString()).toBe('');
     rmSync(dir, { recursive: true, force: true });
   });

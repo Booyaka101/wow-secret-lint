@@ -145,7 +145,9 @@ describe('cli', () => {
     // stale across a release and only a clean-install check caught it.
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     expect(version).toBe(pkg.version);
-    expect(about).toMatch(/^snapshot 12\.1\.5 \(build 69952\), generated /);
+    // A later build is what the weekly refresh exists to pick up, so pin only the floor.
+    const [, build] = about.match(/^snapshot 12\.1\.5 \(build (\d+)\), generated /);
+    expect(Number(build)).toBeGreaterThanOrEqual(69952);
   });
 
   it('fails clearly on a path that does not exist', async () => {
