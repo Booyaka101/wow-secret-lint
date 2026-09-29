@@ -121,6 +121,8 @@ ${file}
       'T.toc': toc('@toc-version-retail@', 'a.lua'),
       'F.toc': toc('16001', 'a.lua'),
       'FC.toc': toc('50504, 16001', 'a.lua'),
+      'FE.toc': toc('16000, 19999', 'a.lua'),
+      'NF.toc': toc('15999, 20000, 20505', 'a.lua'),
       'a.lua': '',
     });
     const get = async (n) => isRetailToc(await parseToc(join(dir, n)));
@@ -130,6 +132,8 @@ ${file}
     expect(await get('T.toc')).toBe(true);
     expect(await get('F.toc')).toBe(true);
     expect(await get('FC.toc')).toBe(true);
+    expect(await get('FE.toc')).toBe(true);
+    expect(await get('NF.toc')).toBe(false);
     await rm(dir, { recursive: true, force: true });
   });
 

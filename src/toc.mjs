@@ -6,7 +6,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep, posix } from 'node:path';
-import { isForeverInterface } from './rules.mjs';
+import { mainlineInterface } from './rules.mjs';
 
 /** Find .toc files in a directory. Returns absolute paths. */
 export async function findTocFiles(dir) {
@@ -29,8 +29,7 @@ export function isClassicToc(tocPath) {
 }
 
 // Retail interface ids have six digits (120001). Every Classic flavour uses five (11507,
-// 40402, 50504), so the width tells them apart. The exception is WoW Forever, five digits
-// on the retail client.
+// 40402, 50504), so the width is a reliable discriminator.
 const RETAIL_INTERFACE = 100000;
 
 /**
@@ -41,7 +40,7 @@ const RETAIL_INTERFACE = 100000;
 export function isRetailToc(toc) {
   if (isClassicToc(toc.path)) return false;
   const ids = toc.interface.map(Number).filter((n) => Number.isFinite(n));
-  return ids.length ? ids.some((n) => n >= RETAIL_INTERFACE || isForeverInterface(n)) : true;
+  return ids.length ? ids.some((n) => mainlineInterface(n) >= RETAIL_INTERFACE) : true;
 }
 
 /**

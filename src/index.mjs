@@ -6,7 +6,7 @@ import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource, analyzeXml } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
 import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
-import { DEFAULT_PATCH, patchAtLeast, patchForInterface } from './rules.mjs';
+import { DEFAULT_PATCH, mainlineInterface, patchForInterface } from './rules.mjs';
 
 export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 export { analyzeSource, analyzeXml } from './analyze.mjs';
@@ -132,8 +132,7 @@ export async function lint(target, options = {}) {
   if (result.patch === 'auto') {
     const label = toPosix(relative(cwd, abs)) || abs;
     if (interfaces.length) {
-      // Forever's 16001 asks for a newer surface than a retail 120100, so compare surfaces, not ids.
-      result.patch = interfaces.map(patchForInterface).reduce((a, b) => (patchAtLeast(a, b) ? a : b));
+      result.patch = patchForInterface(Math.max(...interfaces.map(mainlineInterface)));
     } else {
       result.patch = DEFAULT_PATCH;
       result.warningsBeforeLint.push(

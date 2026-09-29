@@ -25,17 +25,17 @@ export const PATCH_INTERFACES = [
 ];
 
 /**
- * WoW Forever stamps its .toc files 1.60.x (16001) but runs the Mainline client on the
- * 12.1.5 surface, secret values included. Classic Era is 1.15.x, so 1.60 and up is Forever.
+ * The retail Interface number an id behaves as. WoW Forever stamps its .toc files 1.60.x
+ * (16001) but runs the Mainline client with the 12.1.5 API, secret values included, so it
+ * reads as 120105. Classic Era is 1.15.x, so 1.60 and up is Forever.
  */
-export function isForeverInterface(id) {
-  return id >= 16000 && id < 20000;
+export function mainlineInterface(id) {
+  return id >= 16000 && id < 20000 ? 120105 : id;
 }
 
 /** The patch surface an addon's declared Interface number asks for. */
 export function patchForInterface(id) {
-  if (isForeverInterface(id)) return '12.1.5';
-  const match = PATCH_INTERFACES.find(([, floor]) => id >= floor);
+  const match = PATCH_INTERFACES.find(([, floor]) => mainlineInterface(id) >= floor);
   return match ? match[0] : DEFAULT_PATCH;
 }
 
