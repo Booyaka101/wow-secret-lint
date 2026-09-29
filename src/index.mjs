@@ -5,8 +5,8 @@ import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource, analyzeXml } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
-import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, toPosix } from './toc.mjs';
-import { DEFAULT_PATCH, mainlineInterface, patchForInterface } from './rules.mjs';
+import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, mainlineInterface, toPosix } from './toc.mjs';
+import { DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 
 export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 export { analyzeSource, analyzeXml } from './analyze.mjs';

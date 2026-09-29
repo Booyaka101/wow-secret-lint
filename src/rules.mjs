@@ -1,6 +1,8 @@
 // The rule table. Every entry maps 1:1 to a sentence Blizzard actually publishes.
 // `source` records where the rule comes from so nothing here is folklore.
 
+import { mainlineInterface } from './toc.mjs';
+
 const WIKI = 'https://warcraft.wiki.gg/wiki/Secret_Values';
 const PATCH = 'https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes';
 const PATCH121 = 'https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes';
@@ -23,15 +25,6 @@ export const PATCH_INTERFACES = [
   ['12.1', 120100],
   ['12.0', 0],
 ];
-
-/**
- * The retail Interface number an id behaves as. WoW Forever stamps its .toc files 1.60.x
- * (16001) but runs the Mainline client with the 12.1.5 API, secret values included, so it
- * reads as 120105. Classic Era is 1.15.x, so 1.60 and up is Forever.
- */
-export function mainlineInterface(id) {
-  return id >= 16000 && id < 20000 ? 120105 : id;
-}
 
 /** The patch surface an addon's declared Interface number asks for. */
 export function patchForInterface(id) {
