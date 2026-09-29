@@ -170,7 +170,7 @@ ${file}
 
   it('lints only the Forever toc when a Classic one sits beside it', async () => {
     const dir = await fixture({
-      'F/F.toc': toc('16001', 'Core.lua'),
+      'F/F_Camelot.toc': toc('16001', 'Core.lua'),
       'F/F_Vanilla.toc': toc('11507', 'Era.lua'),
       'F/Core.lua': BAD,
       'F/Era.lua': BAD,
@@ -178,7 +178,7 @@ ${file}
     const r = await lint(dir, { cwd: dir, patch: 'auto' });
     expect(r.findings.map((f) => f.file)).toEqual(['F/Core.lua']);
     expect(r.patch).toBe('12.1.5');
-    const direct = await lint(join(dir, 'F', 'F.toc'), { cwd: dir, patch: 'auto' });
+    const direct = await lint(join(dir, 'F', 'F_Camelot.toc'), { cwd: dir, patch: 'auto' });
     expect(direct.patch).toBe('12.1.5');
     await rm(dir, { recursive: true, force: true });
   });
