@@ -1,6 +1,8 @@
 // The rule table. Every entry maps 1:1 to a sentence Blizzard actually publishes.
 // `source` records where the rule comes from so nothing here is folklore.
 
+import { mainlineInterface } from './toc.mjs';
+
 const WIKI = 'https://warcraft.wiki.gg/wiki/Secret_Values';
 const PATCH = 'https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes';
 const PATCH121 = 'https://warcraft.wiki.gg/wiki/Patch_12.1.0/API_changes';
@@ -26,7 +28,7 @@ export const PATCH_INTERFACES = [
 
 /** The patch surface an addon's declared Interface number asks for. */
 export function patchForInterface(id) {
-  const match = PATCH_INTERFACES.find(([, floor]) => id >= floor);
+  const match = PATCH_INTERFACES.find(([, floor]) => mainlineInterface(id) >= floor);
   return match ? match[0] : DEFAULT_PATCH;
 }
 

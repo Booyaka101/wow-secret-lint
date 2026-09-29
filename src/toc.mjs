@@ -28,18 +28,28 @@ export function isClassicToc(tocPath) {
 }
 
 // Retail interface ids have six digits (120001). Every Classic flavour uses five (11507,
-// 40402, 50504), so the width is a reliable discriminator.
+// 40402, 50504), so the width tells them apart once Forever's ids are mapped.
 const RETAIL_INTERFACE = 100000;
 
 /**
+ * The retail Interface number an id behaves as. WoW Forever stamps its .toc files 1.60.x
+ * (16001) but runs the Mainline client with the 12.1.5 API, secret values included, so it
+ * reads as 120105. Classic Era is 1.15.x, so 1.60 to 1.99 is taken as Forever.
+ */
+export function mainlineInterface(id) {
+  return id >= 16000 && id < 20000 ? 120105 : id;
+}
+
+/**
  * True when a parsed .toc can load on retail. A multi-flavour .toc counts as retail if any
- * of its Interface ids is a retail one. Packager tokens like `@toc-version-retail@` are not
- * numbers, so a .toc with no usable id is treated as retail rather than silently skipped.
+ * of its Interface ids is a retail one, Forever's included. Packager tokens like
+ * `@toc-version-retail@` are not numbers, so a .toc with no usable id is treated as retail
+ * rather than silently skipped.
  */
 export function isRetailToc(toc) {
   if (isClassicToc(toc.path)) return false;
   const ids = toc.interface.map(Number).filter((n) => Number.isFinite(n));
-  return ids.length ? ids.some((n) => n >= RETAIL_INTERFACE) : true;
+  return ids.length ? ids.some((n) => mainlineInterface(n) >= RETAIL_INTERFACE) : true;
 }
 
 /**
