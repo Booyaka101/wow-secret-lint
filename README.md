@@ -33,7 +33,7 @@ Node 20 or newer. No network access during a lint run: the API snapshot is vendo
 
 Point it at an addon folder and it reads the `.toc` files to decide which Lua to analyse, in load order, following `<Script>` and `<Include>` entries in any listed `.xml`.
 
-Discovery is flavour-aware. If the folder has no `.toc` it descends up to three levels to find one, which is how most repos are laid out. A `.toc` counts as retail when any of its `## Interface` ids is a retail one; a folder whose every `.toc` targets Classic is skipped with a message rather than scanned. Only when there is no `.toc` anywhere does it fall back to walking every `.lua`, and it says so when it does.
+Discovery is flavour-aware. If the folder has no `.toc` it descends up to three levels to find one, which is how most repos are laid out. A `.toc` counts as retail when any of its `## Interface` ids is a retail one. WoW Forever's `16001` counts too, since Forever runs the retail client with secret values. A folder whose every `.toc` targets Classic is skipped with a message rather than scanned. Only when there is no `.toc` anywhere does it fall back to walking every `.lua`, and it says so when it does.
 
 ```bash
 npx wow-secret-lint ./MyAddon

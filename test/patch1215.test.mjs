@@ -436,6 +436,8 @@ describe('patch surface helpers', () => {
     expect(patchForInterface(120104)).toBe('12.1');
     expect(patchForInterface(120100)).toBe('12.1');
     expect(patchForInterface(120007)).toBe('12.0');
+    expect(patchForInterface(16001)).toBe('12.1.5');
+    expect(patchForInterface(11507)).toBe('12.0');
   });
 });
 

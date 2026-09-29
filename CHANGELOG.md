@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **WoW Forever addons were skipped as Classic.** Forever stamps its `.toc`
+  files `## Interface: 16001`, five digits like every Classic flavour, so a
+  Forever-only addon got `none targeting retail; nothing to check` and exit 0.
+  Forever runs the Mainline client with Midnight's secret values, and Blizzard
+  says it shares the 12.1.5 API. Interface ids from 16000 to 19999 now count as
+  retail, and `--patch=auto` checks them against 12.1.5. A `.toc` listing both,
+  like `120100, 16001`, gets the newer of the two surfaces rather than the one
+  with the larger id. Reported in #14.
+
 ## 1.8.0 - 2026-09-26
 
 The snapshot moves to patch 12.1.5 **build 69952** (mirror commit `5c9363cc`,

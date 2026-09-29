@@ -119,6 +119,8 @@ ${file}
       'C.toc': toc('40402', 'a.lua'),
       'M.toc': toc('120100, 50504, 11509', 'a.lua'),
       'T.toc': toc('@toc-version-retail@', 'a.lua'),
+      'F.toc': toc('16001', 'a.lua'),
+      'FC.toc': toc('50504, 16001', 'a.lua'),
       'a.lua': '',
     });
     const get = async (n) => isRetailToc(await parseToc(join(dir, n)));
@@ -126,6 +128,8 @@ ${file}
     expect(await get('C.toc')).toBe(false);
     expect(await get('M.toc')).toBe(true);
     expect(await get('T.toc')).toBe(true);
+    expect(await get('F.toc')).toBe(true);
+    expect(await get('FC.toc')).toBe(true);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -148,6 +152,22 @@ ${file}
     expect(r.filesScanned).toBe(0);
     expect(r.findings).toEqual([]);
     expect(r.warningsBeforeLint.join(' ')).toMatch(/none targeting retail/);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('lints a WoW Forever addon on the 12.1.5 surface', async () => {
+    const dir = await fixture({ 'F/F.toc': toc('16001', 'Core.lua'), 'F/Core.lua': BAD });
+    const r = await lint(dir, { cwd: dir, patch: 'auto' });
+    expect(r.filesScanned).toBe(1);
+    expect(r.findings.map((f) => f.ruleId)).toEqual(['WSL001']);
+    expect(r.patch).toBe('12.1.5');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('checks a retail 12.1 plus Forever toc against the newer Forever surface', async () => {
+    const dir = await fixture({ 'F/F.toc': toc('120100, 16001', 'Core.lua'), 'F/Core.lua': BAD });
+    const r = await lint(dir, { cwd: dir, patch: 'auto' });
+    expect(r.patch).toBe('12.1.5');
     await rm(dir, { recursive: true, force: true });
   });
 
