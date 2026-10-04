@@ -5,14 +5,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { relative, resolve, dirname } from 'node:path';
 import { analyzeSource, analyzeXml } from './analyze.mjs';
 import { loadSnapshot } from './apidata.mjs';
-import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, mainlineInterface, toPosix } from './toc.mjs';
+import { findTocFilesDeep, parseToc, resolveTocFiles, collectLuaFiles, isRetailToc, isForeverOnly, mainlineInterface, toPosix } from './toc.mjs';
 import { DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 
 export { RULES, RULE_IDS, PATCHES, DEFAULT_PATCH, patchForInterface } from './rules.mjs';
 export { analyzeSource, analyzeXml } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
-export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc } from './toc.mjs';
+export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc, isForeverInterface, isForeverOnly } from './toc.mjs';
+export { foreverHas, FOREVER_CLIENT, FOREVER_SOURCE } from './forever.mjs';
 export { buildBaseline, applyBaseline, applyBaselineFile, readBaseline, writeBaseline } from './baseline.mjs';
 
 export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -41,6 +42,7 @@ export async function lint(target, options = {}) {
     target,
     game,
     patch: options.patch ?? DEFAULT_PATCH,
+    flavour: 'retail',
     filesScanned: 0,
     findings: [],
     parseErrors: [],
@@ -141,6 +143,8 @@ export async function lint(target, options = {}) {
     }
   }
 
+  result.flavour = isForeverOnly(interfaces) ? 'forever' : 'retail';
+
   const analyzeOptions = {
     conditional: options.conditional ?? 'off',
     disable: new Set(options.disable ?? []),
@@ -148,6 +152,7 @@ export async function lint(target, options = {}) {
     accessGuards: new Set(options.accessGuards ?? []),
     strict: options.strict === true,
     patch: result.patch,
+    flavour: result.flavour,
   };
 
   // Files run in .toc load order, which is the order the client runs them, so a widget one
@@ -199,6 +204,7 @@ export async function lintPaths(paths, options = {}) {
   const merged = {
     version: VERSION,
     patch: options.patch ?? DEFAULT_PATCH,
+    flavour: 'retail',
     filesScanned: 0,
     findings: [],
     parseErrors: [],
@@ -208,6 +214,7 @@ export async function lintPaths(paths, options = {}) {
   for (const target of paths) {
     const result = await lint(target, options);
     merged.patch = result.patch;
+    merged.flavour = result.flavour;
     merged.snapshot = result.snapshot;
     merged.filesScanned += result.filesScanned;
     merged.findings.push(...result.findings);

@@ -159,6 +159,18 @@ The baseline keys each finding on file, rule and message with a count, never on 
 | 1 | at least one error, or warnings above `--max-warnings` |
 | 2 | a file failed to parse, or a usage/runtime failure |
 
+### WoW Forever and the removal list
+
+Forever has secret values, so every secret rule applies to it unchanged. What it did not inherit is retail's *removals*. Of the symbols the 12.1 notes list as removed, a good many are still present in the Forever client — `GetWeaponEnchantInfo`, `GetInventorySlotInfo`, `getglobal` and `setglobal` among them. Reporting those against a Forever addon points at a function sitting right there in the client.
+
+So when every `## Interface` id a target declares is a Forever one, `WSL014`-class findings are checked against the Forever client before being reported, and suppressed for symbols it still has. A `.toc` that lists a retail id as well — `## Interface: 120100, 16001` — keeps them, because that file does load on a client where the symbol is genuinely gone. The JSON report names which surface was used in its `flavour` field.
+
+The presence data in `data/forever-presence.json` is a scan of a running Forever client, not generated documentation, so it carries no type or secrecy information and is used for nothing but this existence question. Rebuild it with:
+
+```bash
+node scripts/forever-presence.mjs <forever_api.json>
+```
+
 ## GitHub Action
 
 If you already run [BigWigsMods/luacheck](https://github.com/BigWigsMods/luacheck), this sits next to it. Two lines:

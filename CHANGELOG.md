@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.0 - 2026-10-04
+
+### Fixed
+
+- **Retail's 12.1 removals were reported against Forever addons that still have
+  the symbol.** 1.8.1 made Forever read as retail 12.1.5, which is right for the
+  secret-value rules but wrong for the removal list: Forever branched from a
+  different base and kept 14 of the 23 entries in `REMOVED_CALLS`, including
+  `GetWeaponEnchantInfo`, `GetInventorySlotInfo`, `CancelItemTempEnchantment`,
+  `getglobal` and `setglobal`. A target whose every `## Interface` id is a
+  Forever one now has those checked against a scan of the Forever client and
+  suppressed where it still has them. A `.toc` listing a retail id as well keeps
+  them, since that file loads where the symbol really is gone. Symbols absent
+  from both, such as `UIParentLoadAddOn`, are unaffected, and no secret-value
+  rule changes. Follow-up to #14.
+
+### Added
+
+- `data/forever-presence.json`, a presence-only scan of the Forever client
+  (1.60.1 build 69893), rebuildable with `scripts/forever-presence.mjs`. Derived
+  from [Thunderz96/forever-addon-kit](https://github.com/Thunderz96/forever-addon-kit)
+  (MIT).
+- `flavour` in the JSON report and on the `lint()` result, naming which surface
+  a run used.
+
 ## 1.8.1 - 2026-09-30
 
 ### Fixed

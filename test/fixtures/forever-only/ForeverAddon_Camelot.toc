@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Forever Addon
+## Notes: Forever-only, so retail's 12.1 removals must not be reported against it.
+
+Core/Enchants.lua
