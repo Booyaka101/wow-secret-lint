@@ -62,6 +62,7 @@ export function formatJson(result) {
     {
       version: result.version,
       patch: result.patch,
+      flavour: result.flavour ?? 'retail',
       snapshot: {
         source: result.snapshot.source,
         patch: result.snapshot.patch ?? null,

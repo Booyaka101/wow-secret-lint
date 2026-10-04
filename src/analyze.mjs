@@ -51,6 +51,7 @@ import {
   TRANSLITERATOR_PRECONDITION,
   refusedTransliterator,
 } from './rules.mjs';
+import { foreverHas } from './forever.mjs';
 
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '^']);
 
@@ -122,6 +123,7 @@ class Analyzer {
     this.analysedWithTaint = new Set();
     this.patch121 = patchAtLeast(options.patch, '12.1');
     this.patch1215 = patchAtLeast(options.patch, '12.1.5');
+    this.forever = options.flavour === 'forever';
     this.widgetOf = new Map(); // dotted path -> widget kind, e.g. 'AuraButton', 'ProtectedCooldown'
     this.tableFields = new Map(); // dotted path -> Map(fieldName -> key node)
     this.animationOwner = new Map(); // animation path -> the group path it was created on
@@ -928,8 +930,10 @@ class Analyzer {
 
     if (this.patch121) {
       if (!callee.method) {
+        // Forever branched before retail's 12.1 removals, so a symbol its client still has
+        // is present for a Forever-only addon however gone it is on Mainline.
         const removed = REMOVED_CALLS[name];
-        if (removed) this.report(removed.ruleId, node, removed.message);
+        if (removed && !(this.forever && foreverHas(name))) this.report(removed.ruleId, node, removed.message);
         if (name === 'CreateFrame') this.checkCreateFrameTemplates(args);
         // The call errors outright, so this fires even where the result is guarded.
         if (AURA_ERRORING_CALLS.has(name)) {
@@ -1644,6 +1648,8 @@ export function analyzeSource(source, filePath, api, options = {}) {
     strict: options.strict === true,
     // 'auto' is resolved from the .toc by lint(); a bare file has no .toc to read.
     patch: !options.patch || options.patch === 'auto' ? DEFAULT_PATCH : options.patch,
+    // Resolved from the .toc by lint(); a bare file could be either, so assume retail.
+    flavour: options.flavour ?? 'retail',
     imports: options.imports ?? [],
   };
   const parseOptions = { locations: true, ranges: false, comments: false, scope: false };

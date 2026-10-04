@@ -35,6 +35,18 @@ Point it at an addon folder and it reads the `.toc` files to decide which Lua to
 
 Discovery is flavour-aware. If the folder has no `.toc` it descends up to three levels to find one, which is how most repos are laid out. A `.toc` counts as retail when any of its `## Interface` ids is a retail one. WoW Forever's `16001` counts too, since Forever runs the retail client with secret values. A folder whose every `.toc` targets Classic is skipped with a message rather than scanned. Only when there is no `.toc` anywhere does it fall back to walking every `.lua`, and it says so when it does.
 
+### WoW Forever and the removal list
+
+Forever has secret values, so every secret rule applies to it unchanged. What it did not inherit is retail's *removals*. Of the symbols the 12.1 notes list as removed, a good many are still present in the Forever client — `GetWeaponEnchantInfo`, `GetInventorySlotInfo`, `getglobal` and `setglobal` among them. Reporting those against a Forever addon points at a function sitting right there in the client.
+
+So when every `## Interface` id a target declares is a Forever one, `WSL014`-class findings are checked against the Forever client before being reported, and suppressed for symbols it still has. A `.toc` that lists a retail id as well — `## Interface: 120100, 16001` — keeps them, because that file does load on a client where the symbol is genuinely gone. The JSON report names which surface was used in its `flavour` field.
+
+The presence data in `data/forever-presence.json` is a scan of a running Forever client, not generated documentation, so it carries no type or secrecy information and is used for nothing but this existence question. Rebuild it with:
+
+```bash
+node scripts/forever-presence.mjs <forever_api.json>
+```
+
 ```bash
 npx wow-secret-lint ./MyAddon
 ```

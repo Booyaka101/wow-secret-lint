@@ -1,0 +1,5 @@
+## Interface: 120100, 16001
+## Title: Multi Flavour Addon
+## Notes: Loads on retail too, where the 12.1 removals are real, so they stay reported.
+
+Core/Enchants.lua

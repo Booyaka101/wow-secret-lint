@@ -31,13 +31,27 @@ export function isClassicToc(tocPath) {
 // 40402, 50504), so the width tells them apart once Forever's ids are mapped.
 const RETAIL_INTERFACE = 100000;
 
+/** WoW Forever stamps its .toc files 1.60.x. Classic Era is 1.15.x, so 1.60 to 1.99 is Forever. */
+export function isForeverInterface(id) {
+  return id >= 16000 && id < 20000;
+}
+
 /**
- * The retail Interface number an id behaves as. WoW Forever stamps its .toc files 1.60.x
- * (16001) but runs the Mainline client with the 12.1.5 API, secret values included, so it
- * reads as 120105. Classic Era is 1.15.x, so 1.60 to 1.99 is taken as Forever.
+ * The retail Interface number an id behaves as. Forever runs the Mainline client with the
+ * 12.1.5 API, secret values included, so its ids read as 120105.
  */
 export function mainlineInterface(id) {
-  return id >= 16000 && id < 20000 ? 120105 : id;
+  return isForeverInterface(id) ? 120105 : id;
+}
+
+/**
+ * True when every Interface id the target declares is a Forever one. Retail's removals do
+ * not apply to such an addon, but they do to a .toc that also lists a retail id: that file
+ * loads on both clients, and the symbol really is gone on one of them.
+ */
+export function isForeverOnly(ids) {
+  const numbers = ids.map(Number).filter((n) => Number.isFinite(n));
+  return numbers.length > 0 && numbers.every(isForeverInterface);
 }
 
 /**
