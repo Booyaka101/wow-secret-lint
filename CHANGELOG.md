@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.1 - 2026-10-05
+
+Data only. No rule, message or analysis behaviour changed.
+
+### Changed
+
+- Refreshed `data/api-snapshot.json` from `Gethe/wow-ui-source@12.1.5` (mirror commit
+  `07ac548d`, 2026-09-29, build 70077 of the patch, up from the build 69952 that 1.8.0
+  carried). The mirror moved its `12.1.5` tag forward and the weekly refresh took the newer
+  build off the tag, the path 1.8.0 added for exactly this. Six entries moved in and none out
+  of 10,242: the `C_SocialRestrictions` age-verification APIs
+  `AcknowledgeAgeVerificationRestriction`, `IsAgeVerificationRestricted` and
+  `IsAgeVerificationRestrictedMinor`, each entering the index twice, under `C_SocialRestrictions.`
+  and its bare name. None carries `SecretReturns`, none is conditionally secret, and none
+  appears in any rule list.
+
+Verified inert rather than assumed: the full suite passes against the new snapshot, and all
+10,242 prior functions, 760 structures, 16 widget systems and 37 preconditions are unchanged
+byte for byte. No functions were removed.
+
 ## 1.9.0 - 2026-10-04
 
 ### Fixed
