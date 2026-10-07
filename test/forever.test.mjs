@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lint } from '../src/index.mjs';
 import { isForeverInterface, isForeverOnly } from '../src/toc.mjs';
-import { foreverHas, FOREVER_CLIENT } from '../src/forever.mjs';
+import { foreverHas, foreverClient } from '../src/forever.mjs';
 import { REMOVED_CALLS } from '../src/rules.mjs';
 import { buildPresence } from '../scripts/forever-presence.mjs';
 
@@ -35,8 +35,9 @@ describe('interface classification', () => {
 
 describe('presence data', () => {
   it('came from a Forever client', () => {
-    expect(FOREVER_CLIENT.interface).toBe(16001);
-    expect(FOREVER_CLIENT.build).toBeTruthy();
+    const c = foreverClient();
+    expect(c.interface).toBe(16001);
+    expect(c.build).toBeTruthy();
   });
 
   it('resolves bare globals and dotted namespace members alike', () => {
@@ -76,14 +77,24 @@ describe('linting a Forever-only addon', () => {
   it('reports only the removals Forever actually shares', async () => {
     const result = await lint('test/fixtures/forever-only', { cwd: ROOT });
     expect(result.flavour).toBe('forever');
-    // GetWeaponEnchantInfo, GetInventorySlotInfo and getglobal all still exist on Forever;
-    // UIParentLoadAddOn on line 7 does not.
-    expect(idsAt(result)).toEqual(['WSL014@7']);
+    // GetWeaponEnchantInfo, GetInventorySlotInfo, getglobal and the dotted
+    // C_DyeColor.GetDyeColorForItem all still exist on Forever; UIParentLoadAddOn on
+    // line 8 does not.
+    expect(idsAt(result)).toEqual(['WSL014@8']);
   });
 
   it('keeps reporting them when the same file also loads on retail', async () => {
     const result = await lint('test/fixtures/forever-multi', { cwd: ROOT });
     expect(result.flavour).toBe('retail');
     expect(idsAt(result)).toEqual(['WSL014@1', 'WSL014@2']);
+  });
+
+  it('treats a directory with a Forever toc and a retail toc as retail', async () => {
+    // BetterBags-shaped: two separate .toc files in one folder, one Forever-only, one
+    // retail, both listing the same Lua. The file loads on retail, so the removal stands
+    // even though the Forever addon alone would have suppressed it.
+    const result = await lint('test/fixtures/forever-twotoc', { cwd: ROOT });
+    expect(result.flavour).toBe('retail');
+    expect(idsAt(result)).toEqual(['WSL014@3']);
   });
 });

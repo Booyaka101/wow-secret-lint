@@ -1,0 +1,5 @@
+## Interface: 120100
+## Title: Forever Two Addons (retail side)
+## Notes: Retail addon sharing Core.lua with the Forever addon in this folder.
+
+Core/Shared.lua

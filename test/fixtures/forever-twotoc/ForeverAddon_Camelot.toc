@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Forever Two Addons (Forever side)
+## Notes: Forever-only addon sharing Core.lua with the retail addon in this folder.
+
+Core/Shared.lua
