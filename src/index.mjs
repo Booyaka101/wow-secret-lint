@@ -13,7 +13,7 @@ export { analyzeSource, analyzeXml } from './analyze.mjs';
 export { loadSnapshot, refreshSnapshot, writeSnapshot, extractFile, buildIndex, SNAPSHOT_PATH } from './apidata.mjs';
 export { format, formatStylish, formatJson, formatGithub, FORMATS } from './report.mjs';
 export { parseToc, findTocFiles, findTocFilesDeep, isRetailToc, isForeverInterface, isForeverOnly } from './toc.mjs';
-export { foreverHas, FOREVER_CLIENT, FOREVER_SOURCE } from './forever.mjs';
+export { foreverHas, foreverClient, foreverSource } from './forever.mjs';
 export { buildBaseline, applyBaseline, applyBaselineFile, readBaseline, writeBaseline } from './baseline.mjs';
 
 export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;

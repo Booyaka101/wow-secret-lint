@@ -17,16 +17,34 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PRESENCE_PATH = join(HERE, '..', 'data', 'forever-presence.json');
 
-const presence = JSON.parse(readFileSync(PRESENCE_PATH, 'utf8'));
+// Parsed on first use, like the api snapshot: retail-only runs never read the file, and a
+// missing or corrupt presence file fails Forever suppression instead of the whole linter.
+let symbols = null;
+let client = null;
+let source = null;
+
+function load() {
+  if (symbols) return;
+  const presence = JSON.parse(readFileSync(PRESENCE_PATH, 'utf8'));
+  client = presence.client;
+  source = presence.source;
+  symbols = new Set(presence.globals);
+  for (const [namespace, members] of Object.entries(presence.namespaces)) {
+    symbols.add(namespace);
+    for (const member of members) symbols.add(`${namespace}.${member}`);
+  }
+}
 
 /** The client the scan came from, for reporting which build a suppression rests on. */
-export const FOREVER_CLIENT = presence.client;
-export const FOREVER_SOURCE = presence.source;
+export function foreverClient() {
+  load();
+  return client;
+}
 
-const symbols = new Set(presence.globals);
-for (const [namespace, members] of Object.entries(presence.namespaces)) {
-  symbols.add(namespace);
-  for (const member of members) symbols.add(`${namespace}.${member}`);
+/** Where the presence scan came from. */
+export function foreverSource() {
+  load();
+  return source;
 }
 
 /**
@@ -34,5 +52,6 @@ for (const [namespace, members] of Object.entries(presence.namespaces)) {
  * use, so both `GetWeaponEnchantInfo` and `C_DyeColor.GetDyeColorForItem` resolve.
  */
 export function foreverHas(name) {
+  load();
   return symbols.has(name);
 }

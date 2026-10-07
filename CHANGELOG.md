@@ -1,5 +1,30 @@
 # Changelog
 
+# Changelog
+
+## 1.9.2 - 2026-10-07
+
+### Changed
+
+- **`data/forever-presence.json` is now a first-party scan.** Rebuilt from our own
+  ForeverBeacon capture of the live client (1.60.1 build 70245, interface 16001,
+  project CAMELOT), replacing the third-party scan of build 69893. The new file is
+  also cleaner: the old scan's client had addons loaded, so addon globals
+  (EllesmereUI_*, _EAB_*, EUI_*) sat in the presence set; ours was captured on a
+  pristine install. All 14 previously suppressed symbols are confirmed still
+  present on 70245, and `GetInspectSpecialization` is present there as well —
+  removed on retail, kept on Forever — so 15 of the 23 `REMOVED_CALLS` entries
+  are now suppressed for Forever-only targets.
+- The presence data now loads lazily, like the api snapshot: a retail-only run
+  never reads the file, and a missing or corrupt presence file breaks Forever
+  suppression instead of the whole linter.
+
+### Added
+
+- Fixture coverage for a dotted suppressed call
+  (`C_DyeColor.GetDyeColorForItem`) and for a directory holding both a
+  Forever-only `.toc` and a retail one (the file loads on retail, so the removal
+  stands).
 ## 1.9.1 - 2026-10-05
 
 Data only. No rule, message or analysis behaviour changed.

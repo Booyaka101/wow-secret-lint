@@ -40,8 +40,8 @@ export function buildPresence(scan, { generated = new Date().toISOString() } = {
   }
 
   return {
-    source: SOURCE,
-    sourceLicense: SOURCE_LICENSE,
+    source: scan.source || scan.source_note || SOURCE,
+    sourceLicense: scan.source ? 'see source' : SOURCE_LICENSE,
     client: scan.client ?? null,
     generated,
     globalCount: globals.length,
