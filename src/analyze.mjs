@@ -354,6 +354,12 @@ class Analyzer {
       case 'TableCallExpression': {
         const callee = this.calleeName(node);
         if (!callee) return null;
+        // tostring passes the secret marker through: comparing its result errors in
+        // the live client, so the result inherits the argument's taint instead of
+        // being laundered. Display sinks (SetText, string.format) handle such values.
+        if (!callee.method && callee.name === 'tostring' && node.arguments.length) {
+          return this.taintOf(node.arguments[0], scope);
+        }
         if (SCRUBBERS.has(callee.name) || ALLOWED_SINKS.has(callee.name)) return null;
         if (!callee.method) {
           const entry = this.apiEntry(callee.name);
@@ -850,8 +856,14 @@ class Analyzer {
           this.report(this.ruleFor('WSL001', t), lt ? node.left : node.right, `arithmetic on a secret value: ${this.describe(t)}`, { taint: t });
           if (lt && rt) this.markReported(rt);
         } else if (RELATIONAL.has(node.operator)) {
-          this.report(this.ruleFor('WSL002', t), lt ? node.left : node.right, `comparison of a secret value: ${this.describe(t)}`, { taint: t });
-          if (lt && rt) this.markReported(rt);
+          // `== nil` / `~= nil` is the documented nil-check pattern and live-proven
+          // safe on secret values (the check runs on every event in ClearCombatText
+          // without erroring; only value compares error). Nil is never a secret.
+          const other = lt ? node.right : node.left;
+          if (!(other && other.type === 'NilLiteral')) {
+            this.report(this.ruleFor('WSL002', t), lt ? node.left : node.right, `comparison of a secret value: ${this.describe(t)}`, { taint: t });
+            if (lt && rt) this.markReported(rt);
+          }
         } else if (node.operator === '..') {
           // Explicitly allowed by the wiki for string and number secrets.
           this.markUse(lt, true);

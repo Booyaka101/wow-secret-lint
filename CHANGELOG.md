@@ -2,6 +2,19 @@
 
 # Changelog
 
+## 1.10.2 - 2026-10-11
+
+### Fixed
+
+- **`tostring` propagates the secret marker instead of laundering it.** Live play
+  settled it: `tostring(secret)` is safe to call and safe to render via `SetText`,
+  but comparing its output errors ("attempt to compare ... a secret string value").
+  1.10.1 briefly treated the result as clean, which would have hid the exact
+  comparison that crashed ClearCombatText 0.3.4 in game. `SetText` joins the
+  sanctioned sinks; tostring's result inherits its argument's taint.
+- **Nil-checks are exempt from WSL002.** `x == nil` / `x ~= nil` on a secret is the
+  documented nil-check pattern and live-proven safe; only value comparisons error.
+
 ## 1.10.1 - 2026-10-11
 
 ### Changed

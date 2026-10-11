@@ -220,11 +220,10 @@ export function guardByName(name) {
 export const SCRUBBERS = new Set(['scrubsecretvalues', 'secretwrap']);
 
 /**
- * Calls the wiki explicitly blesses for secrets. Their results are not tracked as secret,
- * because the page names them as the sanctioned way to render a secret value. tostring is
- * here on live evidence instead: ClearCombatText rendered secret payloads through it in
- * game across 0.3.0-0.3.4 with no errors, which is the confirmation WSL011 was waiting
- * for, so the rule is retired and the call counts as a sanctioned sink.
+ * Calls the wiki explicitly blesses for secrets, or that live play proved safe. Their
+ * results are not tracked as secret. tostring is deliberately absent: it passes the
+ * secret marker through to its result (a compare on tostring(secret) errors in the
+ * live client), so it propagates taint instead of scrubbing it.
  */
 export const ALLOWED_SINKS = new Set([
   'string.concat',
@@ -234,7 +233,7 @@ export const ALLOWED_SINKS = new Set([
   'strjoin',
   'strconcat',
   'strformat',
-  'tostring',
+  'SetText',
 ]);
 
 export const COMBAT_LOG_EVENTS = new Set(['COMBAT_LOG_EVENT', 'COMBAT_LOG_EVENT_UNFILTERED']);

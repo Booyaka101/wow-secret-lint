@@ -253,7 +253,7 @@ Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` pr
 
 WSL008 comes from the [12.0.0 API changes](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes): *"COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them."* Use `COMBAT_LOG_EVENT_INTERNAL_UNFILTERED` or the `C_CombatLog` namespace.
 
-WSL011 is retired. It was a warning waiting for in-game confirmation, and the confirmation arrived: ClearCombatText renders secret payloads through `tostring` in the live client with no errors, so `tostring` now counts as a sanctioned sink like `string.format` and its siblings. The id stays unused.
+WSL011 is retired, with the theory corrected by live play. `tostring` on a secret neither errors nor launders: the call is safe and the result still carries the secret marker, so comparing it errors in the live client while passing it to a display sink (`SetText`, `string.format`) renders fine. The analyzer models exactly that — tostring propagates taint to its result, so downstream compares fire WSL002 and downstream display stays clean. The id stays unused.
 
 WSL023 is the one rule whose trigger was confirmed by a crash rather than a sentence in the 12.x notes: `OnTooltipSetUnit` was deprecated in 10.0.2 and removed with the Midnight tooltip rewrite, and hooking it errors on the live client. The four `OnTooltipSet*` writes are flagged unless a `HasScript` guard covers the call — the workaround WhyHidden ships. `OnTooltipCleared` is deliberately absent from the list because nothing shows it was removed.
 

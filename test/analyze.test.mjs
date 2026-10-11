@@ -290,4 +290,21 @@ describe('severity default', () => {
     // WSL004 on line 8 only: the boolean test of ok on line 7 must stay silent.
     expect(ids(src)).toEqual(['WSL004@8']);
   });
+
+  it('tostring passes the secret marker through: comparing its output is WSL002', () => {
+    // The ClearCombatText 0.3.4 crash: text ~= "" errored in game because
+    // tostring(secret) still carries the marker.
+    const src = 'local hp = UnitHealth("t")\nlocal text = tostring(hp)\nif text ~= "" then print("x") end\n';
+    expect(ids(src)).toEqual(['WSL002@3']);
+  });
+
+  it('nil-checks on secrets stay unflagged: == nil and ~= nil are the documented pattern', () => {
+    const src = 'local hp = UnitHealth("t")\nif hp ~= nil then print("x") end\nif hp == nil then return end\n';
+    expect(ids(src)).toEqual([]);
+  });
+
+  it('SetText accepts secret-derived strings: display is a sanctioned sink', () => {
+    const src = 'local hp = UnitHealth("t")\nfs:SetText(tostring(hp))\n';
+    expect(ids(src)).toEqual([]);
+  });
 });
