@@ -2,6 +2,23 @@
 
 # Changelog
 
+## 1.10.1 - 2026-10-11
+
+### Changed
+
+- **WSL011 is retired: `tostring` on a secret is confirmed safe.** The rule existed
+  "until someone confirms it in game", and ClearCombatText 0.3.0-0.3.4 rendered secret
+  payloads through `tostring` in the live client with zero errors. `tostring` now sits
+  in the sanctioned-sink set beside `string.format`, and the rule id stays unused.
+  The 12.0/12.1 recorded surfaces were re-recorded for this intended change.
+
+### Fixed
+
+- **Local wrapper returns are position-aware.** `return true, data` used to taint every
+  variable a caller assigned from the wrapper, so the pcall idiom
+  `local ok, data = wrapper()` flagged `ok` with a boolean-test warning. Now only the
+  positions that actually carry a secret are tainted.
+
 ## 1.10.0 - 2026-10-11
 
 ### Added

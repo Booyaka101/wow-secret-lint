@@ -65,8 +65,8 @@ describe('cli', () => {
     const r = await run(['--strict', '--format=github', 'test/fixtures/rules/every-rule.lua']);
     const lines = r.stdout.trim().split('\n');
     expect(lines.filter((l) => /^::error file=[^,]+,line=\d+,col=\d+,title=/.test(l)).length).toBe(8);
-    expect(lines.filter((l) => /^::warning file=/.test(l)).length).toBe(1);
-    expect(lines.at(-1)).toMatch(/^::notice::8 errors, 1 warning/);
+    expect(lines.filter((l) => /^::warning file=/.test(l)).length).toBe(0);
+    expect(lines.at(-1)).toMatch(/^::notice::8 errors, 0 warnings/);
   });
 
   it('emits parseable JSON', async () => {

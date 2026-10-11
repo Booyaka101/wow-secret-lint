@@ -94,11 +94,6 @@ export const RULES = {
     summary: 'conditionally secret value used with no guard anywhere in scope',
     source: 'Blizzard_APIDocumentationGenerated: SecretWhen*/SecretIn*/SecretReturnsForAspect. The value is secret only while that restriction is active, so this is a warning rather than an error.',
   },
-  WSL011: {
-    severity: 'warning',
-    summary: 'tostring() on a secret value',
-    source: `Inferred. tostring is absent from the allowed list on ${WIKI} and is not documented as forbidden either; kept a warning until confirmed in game.`,
-  },
   WSL012: {
     severity: 'error',
     patch: '12.1',
@@ -226,7 +221,10 @@ export const SCRUBBERS = new Set(['scrubsecretvalues', 'secretwrap']);
 
 /**
  * Calls the wiki explicitly blesses for secrets. Their results are not tracked as secret,
- * because the page names them as the sanctioned way to render a secret value.
+ * because the page names them as the sanctioned way to render a secret value. tostring is
+ * here on live evidence instead: ClearCombatText rendered secret payloads through it in
+ * game across 0.3.0-0.3.4 with no errors, which is the confirmation WSL011 was waiting
+ * for, so the rule is retired and the call counts as a sanctioned sink.
  */
 export const ALLOWED_SINKS = new Set([
   'string.concat',
@@ -236,6 +234,7 @@ export const ALLOWED_SINKS = new Set([
   'strjoin',
   'strconcat',
   'strformat',
+  'tostring',
 ]);
 
 export const COMBAT_LOG_EVENTS = new Set(['COMBAT_LOG_EVENT', 'COMBAT_LOG_EVENT_UNFILTERED']);

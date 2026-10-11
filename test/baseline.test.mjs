@@ -92,8 +92,8 @@ describe('baseline files', () => {
       const path = join(dir, 'baseline.json');
       const wrote = await run(['--strict', `--write-baseline=${path}`, EVERY]);
       expect(wrote.code).toBe(0);
-      expect(wrote.stderr).toMatch(/wrote .*baseline\.json: 9 entries covering 9 findings/);
-      expect(wrote.stdout).toMatch(/8 errors, 1 warning/);
+      expect(wrote.stderr).toMatch(/wrote .*baseline\.json: 8 entries covering 8 findings/);
+      expect(wrote.stdout).toMatch(/8 errors, 0 warnings/);
       const recorded = JSON.parse(await readFile(path, 'utf8'));
       expect(recorded.entries.every((e) => e.file === 'test/fixtures/rules/every-rule.lua')).toBe(true);
       expect(recorded.patch).toBe('12.1.5');
@@ -101,17 +101,17 @@ describe('baseline files', () => {
       const clean = await run(['--strict', `--baseline=${path}`, EVERY]);
       expect(clean.code).toBe(0);
       expect(clean.stdout.trim().split('\n')).toEqual([
-        `9 findings suppressed by baseline ${path}`,
+        `8 findings suppressed by baseline ${path}`,
         '0 errors, 0 warnings',
       ]);
 
       const json = await run(['--strict', `--baseline=${path}`, '--format=json', EVERY]);
       const parsed = JSON.parse(json.stdout);
-      expect(parsed.baseline).toEqual({ path, suppressed: 9, stale: 0 });
+      expect(parsed.baseline).toEqual({ path, suppressed: 8, stale: 0 });
       expect(parsed.findings).toEqual([]);
 
       const github = await run(['--strict', `--baseline=${path}`, '--format=github', EVERY]);
-      expect(github.stdout).toMatch(/^::notice::9 findings suppressed by baseline /m);
+      expect(github.stdout).toMatch(/^::notice::8 findings suppressed by baseline /m);
     } finally {
       await teardown();
     }

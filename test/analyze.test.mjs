@@ -77,9 +77,9 @@ describe('forbidden operations', () => {
     expect(ids('f:RegisterEvent("PLAYER_LOGIN")\n')).toEqual([]);
   });
 
-  it('WSL011 tostring on a secret', () => {
-    const f = run('local hp = UnitHealth("t")\nlocal s = tostring(hp)\n').findings;
-    expect(f.map((x) => [x.ruleId, x.severity])).toEqual([['WSL011', 'warning']]);
+  it('tostring on a secret is a sanctioned sink, not a finding (WSL011 retired by live confirmation)', () => {
+    const f = run('local hp = UnitHealth("t")\nlocal s = tostring(hp)\nprint(s)\n').findings;
+    expect(f).toEqual([]);
   });
 });
 
@@ -242,8 +242,8 @@ describe('rule filtering and failure handling', () => {
     expect(ids('local hp = UnitHealth("t")\nlocal x = hp * 2\n', { disable: ['WSL001'] })).toEqual([]);
   });
 
-  it('the rule table lists 23 rules', () => {
-    expect(RULE_IDS).toHaveLength(23);
+  it('the rule table lists 22 rules', () => {
+    expect(RULE_IDS).toHaveLength(22);
   });
 
   it('reports a parse error instead of throwing', () => {
@@ -273,5 +273,21 @@ describe('severity default', () => {
     const src = 'f:RegisterEvent("COMBAT_LOG_EVENT")' + String.fromCharCode(10);
     expect(run(src).findings.map((f) => f.severity)).toEqual(['error']);
     expect(run(src, { strict: true }).findings.map((f) => f.severity)).toEqual(['error']);
+  });
+
+  it('a pcall wrapper keeps the success boolean clean and taints only the payload positions', () => {
+    const src = [
+      'local function ev()',
+      '  local ok, data = pcall(C_CombatText.GetCurrentEventInfo)',
+      '  if ok then return true, data end',
+      '  return false',
+      'end',
+      'local ok, data = ev()',
+      'if not ok then return end',
+      'if #data > 0 then print("x") end',
+      '',
+    ].join('\n');
+    // WSL004 on line 8 only: the boolean test of ok on line 7 must stay silent.
+    expect(ids(src)).toEqual(['WSL004@8']);
   });
 });

@@ -359,7 +359,9 @@ class Analyzer {
           const entry = this.apiEntry(callee.name);
           if (entry) return this.returnTaint(callee.name, entry, 0, node);
           const local = this.localFns.get(callee.name);
-          if (local && local.secretReturns) return { ...local.secretReturns, label: null };
+          if (local && local.secretReturns && local.secretReturns[0]) {
+            return { ...local.secretReturns[0], label: null };
+          }
         }
         return null;
       }
@@ -823,8 +825,14 @@ class Analyzer {
     }
 
     const entry = this.apiEntry(callee.name);
-    if (!entry) return null;
-    return this.returnTaint(callee.name, entry, index, node);
+    if (entry) return this.returnTaint(callee.name, entry, index, node);
+    // Local wrappers keep their per-position taints: `return true, data` cleans the
+    // caller's first variable and taints the second.
+    const local = this.localFns.get(callee.name);
+    if (local && local.secretReturns && local.secretReturns[index]) {
+      return { ...local.secretReturns[index], label: null };
+    }
+    return null;
   }
 
   /** Walk an expression, reporting every forbidden operation it performs. */
@@ -1041,13 +1049,6 @@ class Analyzer {
     }
     if (ALLOWED_SINKS.has(name) || this.guardShape(callee)) {
       for (const t of argTaints) this.markUse(t, true);
-      return;
-    }
-    if (!callee.method && name === 'tostring') {
-      for (let i = 0; i < args.length; i++) {
-        const t = argTaints[i];
-        if (t) this.report('WSL011', args[i], `tostring() on a secret value: ${this.describe(t)}`, { taint: t });
-      }
       return;
     }
 
@@ -1522,20 +1523,21 @@ class Analyzer {
     if (!name) return;
     const rec = this.localFns.get(name);
     if (!rec) return;
-    let found = null;
+    // Position-aware: `return true, data` taints only the caller's second variable,
+    // so a pcall-style `local ok, x = wrapper()` keeps ok clean. Multiple return
+    // statements merge; the first taint recorded for a position wins.
     walk(fnNode.body, (n) => {
-      if (found) return false;
       if (n.type === 'FunctionDeclaration') return false; // nested function, not this one
       if (n.type !== 'ReturnStatement') return;
-      for (const a of n.arguments || []) {
+      (n.arguments || []).forEach((a, i) => {
+        if (rec.secretReturns && rec.secretReturns[i]) return;
         const t = this.taintOf(a, scope);
         if (t) {
-          found = t;
-          return false;
+          if (!rec.secretReturns) rec.secretReturns = [];
+          rec.secretReturns[i] = t;
         }
-      }
+      });
     });
-    if (found) rec.secretReturns = found;
   }
 
   // ---------------------------------------------------------- boolean tests

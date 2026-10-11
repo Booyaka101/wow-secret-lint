@@ -495,8 +495,9 @@ describe('the --patch flag at 12.1.5', () => {
   });
 });
 
-describe('the 12.0 and 12.1 surfaces are unchanged from v1.4.2', () => {
-  // Recorded by running v1.4.2 over the fixture corpus below, before any 12.1.5 work.
+describe('the 12.0 and 12.1 surfaces are unchanged from 1.10.1', () => {
+  // Re-recorded for 1.10.1: WSL011's retirement (tostring confirmed safe in game) is the
+  // one intended change from the v1.4.2 recordings this suite was born from.
   async function targets() {
     const rules121 = (await readdir(join(HERE, 'fixtures', 'rules-121')))
       .filter((f) => f.endsWith('.lua'))
