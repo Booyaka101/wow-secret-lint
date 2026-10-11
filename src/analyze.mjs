@@ -29,6 +29,7 @@ import {
   ITERATORS,
   AURA_SUGGESTION,
   REMOVED_CALLS,
+  REMOVED_SCRIPTS,
   REMOVED_TEMPLATE,
   REMOVED_TEMPLATE_MESSAGE,
   RENAMED_STRUCT_FIELDS,
@@ -129,6 +130,7 @@ class Analyzer {
     this.animationOwner = new Map(); // animation path -> the group path it was created on
     this.loopCounters = new Set(); // numeric for-loop variables in scope, e.g. the i of "ActionButton"..i
     this.unprotected = new Set(); // paths inside a branch that tested frame:IsProtected() false
+    this.scriptGuarded = new Map(); // path -> Set of script names a branch proved via HasScript
     this.hookedHandlers = new Set(); // function nodes hooksecurefunc installs on the Cooldown widget type
     this.hookedHandlerNames = new Set(); // the same, by dotted name, for handlers defined out of line
     this.stringConst = new Map(); // dotted path -> its string value, for `local PLAYER = "player"`
@@ -415,6 +417,14 @@ class Analyzer {
         const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
         return recv ? { whenTrue: [], whenFalse: [{ path: recv, prefix: false, set: 'unprotected' }] } : empty;
       }
+      // `if tooltip:HasScript("OnTooltipSetUnit") then` proves the script exists on that
+      // receiver for the branch, which is the guard WSL023 asks for.
+      if (callee.method && callee.name === 'HasScript') {
+        const s = stringValue(node.arguments[0]);
+        const recv = node.base && node.base.base ? this.pathOf(node.base.base) : null;
+        if (s && recv) return { whenTrue: [{ path: recv, prefix: false, set: 'script:' + s }], whenFalse: [] };
+        return empty;
+      }
       const g = this.guardShape(callee);
       if (!g) return empty;
       // `obj:HasSecretValues()` guards the receiver; `issecretvalue(x)` guards its arguments.
@@ -441,6 +451,19 @@ class Analyzer {
   applyGuards(marks) {
     const added = [];
     for (const m of marks) {
+      if (typeof m.set === 'string' && m.set.startsWith('script:')) {
+        const script = m.set.slice(7);
+        let names = this.scriptGuarded.get(m.path);
+        if (!names) {
+          names = new Set();
+          this.scriptGuarded.set(m.path, names);
+        }
+        if (!names.has(script)) {
+          names.add(script);
+          added.push({ map: this.scriptGuarded, path: m.path, script });
+        }
+        continue;
+      }
       const set = m.set === 'unprotected' ? this.unprotected : this.cleared;
       if (!set.has(m.path)) {
         set.add(m.path);
@@ -451,7 +474,17 @@ class Analyzer {
   }
 
   releaseGuards(added) {
-    for (const { set, path } of added) set.delete(path);
+    for (const a of added) {
+      if (a.map) {
+        const names = a.map.get(a.path);
+        if (names) {
+          names.delete(a.script);
+          if (!names.size) a.map.delete(a.path);
+        }
+        continue;
+      }
+      a.set.delete(a.path);
+    }
   }
 
   /**
@@ -776,6 +809,19 @@ class Analyzer {
     if (!node || node.type !== 'CallExpression') return null;
     const callee = this.calleeName(node);
     if (!callee || callee.method) return null;
+
+    // pcall/xpcall: the wrapped function's returns shift by 1 (success boolean is first).
+    // pcall(fn) returns (ok, ret0, ret1, ...), so our index 1 is the wrapped fn's index 0.
+    if (callee.name === 'pcall' || callee.name === 'xpcall') {
+      const wrappedFn = node.arguments[0];
+      if (!wrappedFn) return null;
+      const wrappedCallee = this.calleeName({ base: wrappedFn });
+      if (!wrappedCallee || wrappedCallee.method) return null;
+      const wrappedEntry = this.apiEntry(wrappedCallee.name);
+      if (!wrappedEntry) return null;
+      return this.returnTaint(wrappedCallee.name, wrappedEntry, index - 1, wrappedFn);
+    }
+
     const entry = this.apiEntry(callee.name);
     if (!entry) return null;
     return this.returnTaint(callee.name, entry, index, node);
@@ -955,6 +1001,21 @@ class Analyzer {
             node,
             `${forbidden.verb} on an ${widgetType} is disallowed by its ${forbidden.aspect} forbidden aspect: ${recv}:${name}()`
           );
+        }
+        // WSL023: only the writes are flagged. The live crash came from HookScript, and the
+        // reads (HasScript/GetScript) are exactly the guard the rule asks for.
+        if (name === 'HookScript' || name === 'SetScript') {
+          const s = stringValue(args[0]);
+          if (s && REMOVED_SCRIPTS.has(s)) {
+            const guarded = recv ? this.scriptGuarded.get(recv) : null;
+            if (!(guarded && guarded.has(s))) {
+              this.report(
+                'WSL023',
+                args[0],
+                `${s} was removed with the Midnight tooltip rewrite, so ${name} errors on it; guard with HasScript or migrate to TooltipDataProcessor.AddCallback`
+              );
+            }
+          }
         }
         if (this.patch1215) {
           this.applyPandemicAspects(name, args);

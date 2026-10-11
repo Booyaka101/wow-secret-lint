@@ -242,8 +242,8 @@ describe('rule filtering and failure handling', () => {
     expect(ids('local hp = UnitHealth("t")\nlocal x = hp * 2\n', { disable: ['WSL001'] })).toEqual([]);
   });
 
-  it('the rule table lists 22 rules', () => {
-    expect(RULE_IDS).toHaveLength(22);
+  it('the rule table lists 23 rules', () => {
+    expect(RULE_IDS).toHaveLength(23);
   });
 
   it('reports a parse error instead of throwing', () => {

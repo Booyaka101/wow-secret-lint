@@ -224,7 +224,7 @@ This applies to the Action only. The CLI still runs on Node 20 or newer, so
 
 ## Rules
 
-Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014, WSL017, WSL018, WSL019, WSL020 and WSL021 fail a build by default; the rest are warnings.
+Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` prints the table with the source for each. WSL008, WSL012, WSL013, WSL014, WSL017, WSL018, WSL019, WSL020, WSL021 and WSL023 fail a build by default; the rest are warnings.
 
 | Rule | Severity | What it catches |
 | --- | --- | --- |
@@ -250,10 +250,13 @@ Every rule maps to one sentence Blizzard publishes. `wow-secret-lint --rules` pr
 | WSL020 | error | 12.1.5: adding or reparenting an animation on a group that carries `AddAnimations` |
 | WSL021 | error | 12.1.5: `SetCooldown`/`Clear` on a cooldown frame Blizzard protects |
 | WSL022 | warning | 12.1.5: secret text passed to `C_Intl.Transliterate` with a `Null` or `Remove` transliterator |
+| WSL023 | error | 12.0: `HookScript`/`SetScript` for a tooltip script the Midnight rewrite removed |
 
 WSL008 comes from the [12.0.0 API changes](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes): *"COMBAT_LOG_EVENT and COMBAT_LOG_EVENT_UNFILTERED will error when trying to register them."* Use `COMBAT_LOG_EVENT_INTERNAL_UNFILTERED` or the `C_CombatLog` namespace.
 
 WSL011 is a warning on purpose. `tostring` is absent from the wiki's allowed list but is not listed as forbidden either, so it stays a warning until someone confirms it in game.
+
+WSL023 is the one rule whose trigger was confirmed by a crash rather than a sentence in the 12.x notes: `OnTooltipSetUnit` was deprecated in 10.0.2 and removed with the Midnight tooltip rewrite, and hooking it errors on the live client. The four `OnTooltipSet*` writes are flagged unless a `HasScript` guard covers the call — the workaround WhyHidden ships. `OnTooltipCleared` is deliberately absent from the list because nothing shows it was removed.
 
 ### The 12.1 rules in detail
 

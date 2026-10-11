@@ -165,9 +165,29 @@ export const RULES = {
     summary: 'secret text passed to C_Intl.Transliterate with a Null or Remove transliterator',
     source: `Blizzard_APIDocumentationGenerated (12.1.5 build 69952): C_Intl.Transliterate carries the TransliteratorAllowed precondition, "Prevents Remove and Null transliterators when used with secret text arguments.", FailureMode = "ReturnNothing". The call returns nothing rather than erroring, so this is a warning. ${PATCH1215} : C_Intl.Transliterate "does not allow Null or Remove transliterators for secret text from tainted code."`,
   },
+  WSL023: {
+    severity: 'error',
+    patch: '12.0',
+    summary: 'HookScript/SetScript for a widget script removed with the Midnight tooltip rewrite',
+    source:
+      'Live crash on the Forever client (Midnight): GameTooltip:HookScript("OnTooltipSetUnit", ...) errors because the 12.0 tooltip rewrite removed the OnTooltipSet* script family, deprecated since 10.0.2 in favour of TooltipDataProcessor/TooltipDataManager. WhyHidden v0.3.3 proves the guard: HasScript returns false for the missing script, so the hook is skipped at runtime. Flagged only when the call is not inside a matching HasScript guard.',
+  },
 };
 
 export const RULE_IDS = Object.keys(RULES);
+
+/**
+ * Widget scripts no widget has since the Midnight tooltip rewrite. OnTooltipSetUnit is
+ * confirmed by a live error on the Forever client; the rest are the same family, all
+ * deprecated together in 10.0.2. OnTooltipCleared is deliberately absent: nothing shows
+ * it was removed, and the conservative list keeps the error-severity rule honest.
+ */
+export const REMOVED_SCRIPTS = new Set([
+  'OnTooltipSetUnit',
+  'OnTooltipSetItem',
+  'OnTooltipSetSpell',
+  'OnTooltipSetEquipmentSet',
+]);
 
 /** Guard predicates: name -> which branch clears the taint, and whether it clears a whole table. */
 export const GUARDS = {

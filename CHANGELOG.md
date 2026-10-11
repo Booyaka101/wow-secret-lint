@@ -2,6 +2,27 @@
 
 # Changelog
 
+## 1.10.0 - 2026-10-11
+
+### Added
+
+- **WSL023: `HookScript`/`SetScript` for a tooltip script the Midnight rewrite removed.**
+  The trigger was confirmed by a live crash, not a patch note: WhyHidden v0.3.2 erroring
+  on `GameTooltip:HookScript("OnTooltipSetUnit", ...)` in the Forever client (Midnight).
+  The four `OnTooltipSet*` writes are errors unless a `HasScript` guard covers the call,
+  which the analyzer now understands (the guard WhyHidden v0.3.3 ships).
+- **`--baseline` now gates.** The flag's contract was "gate CI on new findings only",
+  but a run with unsuppressed warnings still exited 0. Baseline mode now fails on any
+  finding the baseline does not account for; an explicit `--max-warnings` overrides.
+
+### Fixed
+
+- **Taint now propagates through `pcall`/`xpcall`.** `local ok, data = pcall(C_CombatText.GetCurrentEventInfo)`
+  used to lose the secret marker, so `#data` on the next line went unreported. The
+  wrapper's returns shift by one past the success boolean, and local functions wrapping
+  secret calls propagate the taint to their callers. This is the exact path that crashed
+  ClearCombatText 0.3.1 in the live game; the linter now reports it as WSL004.
+
 ## 1.9.2 - 2026-10-07
 
 ### Changed

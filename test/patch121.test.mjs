@@ -296,3 +296,41 @@ describe('the --patch flag', () => {
     expect(JSON.parse(r.stdout).patch).toBe('12.0');
   });
 });
+
+describe('WSL023 removed tooltip scripts', () => {
+  it('flags an unguarded HookScript on OnTooltipSetUnit', () => {
+    expect(ids('GameTooltip:HookScript("OnTooltipSetUnit", function() end)\n', { patch: '12.1' })).toEqual(['WSL023@1']);
+  });
+
+  it('accepts the HasScript guard WhyHidden ships', () => {
+    const src = [
+      'if GameTooltip.HasScript and GameTooltip:HasScript("OnTooltipSetUnit") then',
+      '  GameTooltip:HookScript("OnTooltipSetUnit", function(self) end)',
+      'end',
+      '',
+    ].join('\n');
+    expect(ids(src, { patch: '12.1' })).toEqual([]);
+  });
+
+  it('flags SetScript the same way', () => {
+    expect(ids('GameTooltip:SetScript("OnTooltipSetItem", function() end)\n', { patch: '12.1' })).toEqual(['WSL023@1']);
+  });
+
+  it('leaves scripts the rewrite kept alone', () => {
+    expect(ids('f:HookScript("OnEvent", function() end)\n', { patch: '12.1' })).toEqual([]);
+  });
+
+  it('does not flag below the shared 12.1 gate', () => {
+    expect(ids('GameTooltip:HookScript("OnTooltipSetUnit", function() end)\n', { patch: '12.0' })).toEqual([]);
+  });
+
+  it('a HasScript guard for one script does not clear another', () => {
+    const src = [
+      'if GameTooltip:HasScript("OnTooltipSetUnit") then',
+      '  GameTooltip:HookScript("OnTooltipSetSpell", function(self) end)',
+      'end',
+      '',
+    ].join('\n');
+    expect(ids(src, { patch: '12.1' })).toEqual(['WSL023@2']);
+  });
+});

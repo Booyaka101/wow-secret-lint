@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -192,5 +194,74 @@ describe('cli', () => {
     const r = await run(['package.json']);
     expect(r.stderr).toMatch(/not a Lua or \.toc file/);
     expect(r.code).toBe(2);
+  });
+});
+
+describe('cli baseline gating', () => {
+  const ADDON = (extra = '') =>
+    [
+      'local hp = UnitHealth("player")',
+      'if hp > 5 then print("big") end',
+      extra,
+      '',
+    ].join('\n');
+
+  async function withAddon(extra, fn) {
+    const dir = await mkdtemp(join(tmpdir(), 'wsl-baseline-'));
+    await writeFile(join(dir, 'Addon.lua'), ADDON(extra));
+    await writeFile(join(dir, 'Addon.toc'), '## Interface: 120105\nAddon.lua\n');
+    return fn(dir);
+  }
+
+  it('exits 0 on unchanged code with the baseline applied', async () => {
+    await withAddon('', async (dir) => {
+      const base = join(dir, 'baseline.json');
+      const w = await run(['--write-baseline=' + base, dir]);
+      expect(w.code).toBe(0);
+      const recorded = JSON.parse(readFileSync(base, 'utf8'));
+      expect(recorded.tool).toBe('wow-secret-lint');
+      expect(recorded.entries.length).toBeGreaterThan(0);
+
+      const r = await run(['--baseline=' + base, dir]);
+      expect(r.stdout).toMatch(/findings? suppressed by baseline/);
+      expect(r.stdout).toMatch(/0 errors, 0 warnings/);
+      expect(r.code).toBe(0);
+    });
+  });
+
+  it('exits 1 on a finding that is new since the baseline', async () => {
+    await withAddon('', async (dir) => {
+      const base = join(dir, 'baseline.json');
+      await run(['--write-baseline=' + base, dir]);
+      await writeFile(join(dir, 'Addon.lua'), ADDON('if #hp > 0 then print("len") end'));
+
+      const r = await run(['--baseline=' + base, dir]);
+      expect(r.stdout).toMatch(/WSL004/);
+      expect(r.code).toBe(1);
+    });
+  });
+
+  it('lets an explicit --max-warnings override the gating', async () => {
+    await withAddon('', async (dir) => {
+      const base = join(dir, 'baseline.json');
+      await run(['--write-baseline=' + base, dir]);
+      await writeFile(join(dir, 'Addon.lua'), ADDON('if #hp > 0 then print("len") end'));
+
+      const r = await run(['--baseline=' + base, '--max-warnings=5', dir]);
+      expect(r.code).toBe(0);
+    });
+  });
+
+  it('stays at 0 when a recorded finding is fixed, and says to re-record', async () => {
+    await withAddon('', async (dir) => {
+      const base = join(dir, 'baseline.json');
+      await run(['--write-baseline=' + base, dir]);
+      await writeFile(join(dir, 'Addon.lua'), 'print("clean")\n');
+
+      const r = await run(['--baseline=' + base, dir]);
+      expect(r.stdout).toMatch(/0 errors, 0 warnings/);
+      expect(r.stdout).toMatch(/no longer match, re-record/);
+      expect(r.code).toBe(0);
+    });
   });
 });

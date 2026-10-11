@@ -37,8 +37,9 @@ Options:
   --access-guard=<names>          extra can-access wrapper functions, comma separated
   --disable=<ids>                 comma-separated rule ids to silence, e.g. WSL010,WSL011
   --max-warnings=<n>              exit 1 when warnings exceed n (default: unlimited)
-  --baseline=<path>               suppress the findings recorded in this file and report
-                                  only what is new since it was written
+  --baseline=<path>               suppress the findings recorded in this file and exit 1 on
+                                  anything new since it was written (an explicit
+                                  --max-warnings overrides the gating)
   --write-baseline=<path>         record every finding of this run to the file and exit 0,
                                   so an addon with a backlog can gate CI on new findings
   --snapshot=<path>               use a different API snapshot
@@ -248,7 +249,13 @@ async function main() {
     );
     return 0;
   }
-  if (opts.baseline) await applyBaselineFile(merged, opts.baseline).catch((err) => fail(err.message));
+  if (opts.baseline) {
+    await applyBaselineFile(merged, opts.baseline).catch((err) => fail(err.message));
+    // The baseline pins the accepted findings, so a baseline run gates on what is new:
+    // "gate CI on new findings only" is the feature's contract. An explicit
+    // --max-warnings still overrides (Infinity is the sentinel for "not given").
+    if (opts.maxWarnings === Infinity) opts.maxWarnings = 0;
+  }
 
   process.stdout.write(format(merged, opts.format) + '\n');
 
