@@ -2,6 +2,13 @@
 
 # Changelog
 
+## 1.10.3 - 2026-11-03
+
+### Changed
+
+- Refresh the bundled Blizzard API snapshot to WoW 12.1.5 build 70688 from wow-ui-source. The latest refresh changes upstream build metadata without changing the recorded API surface.
+- Synchronize the lockfile's root package version with the release version.
+
 ## 1.10.2 - 2026-10-11
 
 ### Fixed
